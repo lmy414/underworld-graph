@@ -37,9 +37,11 @@ jobs:
   publish:
     name: Publish to npm
     needs: test
-    # NPM_TOKEN secret 未配置时自动跳过（避免 tag push 因 401 变红）
-    if: startsWith(github.ref, 'refs/tags/v') && secrets.NPM_TOKEN != ''
+    # NPM_TOKEN 未配置时 publish step 自动跳过（避免 tag push 因 401 变红）
+    if: startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
+    env:
+      NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
     permissions:
       contents: read
       id-token: write
@@ -55,6 +57,7 @@ jobs:
       - name: Build
         run: npm run build
       - name: Publish
+        if: env.NPM_TOKEN != ''
         run: npm publish --access public --provenance
         env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+          NODE_AUTH_TOKEN: ${{ env.NPM_TOKEN }}
