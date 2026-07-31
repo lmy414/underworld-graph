@@ -34,7 +34,7 @@
   },
   "scripts": {
     "build": "tsc",
-    "test": "tsx --test tests/**/*.test.ts",
+    "test": "tsx --test tests/*.test.ts",
     "typecheck": "tsc --noEmit",
     "smoke": "tsx scripts/smoke.mjs",
     "prepare": "npm run build",

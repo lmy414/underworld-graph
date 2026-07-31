@@ -37,7 +37,8 @@ jobs:
   publish:
     name: Publish to npm
     needs: test
-    if: startsWith(github.ref, 'refs/tags/v')
+    # NPM_TOKEN secret 未配置时自动跳过（避免 tag push 因 401 变红）
+    if: startsWith(github.ref, 'refs/tags/v') && secrets.NPM_TOKEN != ''
     runs-on: ubuntu-latest
     permissions:
       contents: read
