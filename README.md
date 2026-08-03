@@ -2,6 +2,8 @@
 
 > Bi-temporal narrative state graph for fiction-writing engines.
 
+**Documentation**: https://uw.emaostudio.online/
+
 Standalone narrative state management library. Stores entities, relations, facts,
 events, and visibility declarations on a bi-temporal SQLite + TypeGraph backend.
 
