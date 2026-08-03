@@ -1559,55 +1559,83 @@ sudo systemctl restart your-service
 
 ---
 
-## 9. 已知问题与后续路线
+## 9. 已知问题清单
 
-详见 [`docs/design-review-2026-08-02.md`](./design-review-2026-08-02.md)（14 项评审）
-+ 0.1.1 新发现的 11 项，共 25 项。
+> 本章节汇总所有已识别的问题，按修复风险分四级。每项给出：问题描述、影响范围、
+> 修复方案、风险等级、当前状态。
+>
+> 来源：[`docs/design-review-2026-08-02.md`](./design-review-2026-08-02.md) 的 14 项设计评审
+> + 0.1.1 开发期新发现的 10 项，共 24 项。
+>
+> **风险分级定义**：
+> - **A 类**：纯内部清理，零下游影响，可直接修。
+> - **B 类**：向后兼容的实现优化，API 不变，行为更合理，零下游影响。
+> - **C 类**：向后兼容的 API 扩展（新增可选参数/方法，原行为不变）。
+> - **D 类：需消费方对齐的破坏性修复**，改了会触发 MIGRATION_ERROR、改变 SQLite
+>   schema、改变公开输出字段或现有调用语义，**必须先与 narrative-engine / novel
+>   消费方对齐才能动**。
 
-### 9.1 0.1.1 已修复（7 项纯内部清理）
+### 9.1 A 类：已修复（0.1.1，7 项）
 
-- INFINITY 常量统一导出
-- findNodes 返回 GraphRecord[]，去 30+ 处 any
-- processEvent 加 async mutex
-- EventLog 加 no-op close()
-- README migrate 措辞修正
-- typegraph 版本锁定
-- declaresEdge 补注释
+| # | 问题 | 影响 | 修复方案 | 状态 |
+|---|---|---|---|---|
+| A1 | [Infinity 哨兵重复定义](file:///d:/claude/pi-ex/underworld-graph/src/character-view.ts) — character-view.ts 本地定义 `"Infinity"` 字符串，与 types.ts 不一致 | 字符串字面量散落，未来改哨兵值会漏改 | 导出 `INFINITY` 常量到 types.ts，character-view.ts 引用之，删除 dead code | ✅ 0.1.1 已修 |
+| A2 | 大量 `any` / `as unknown as EmbeddingValue` 散落 [world-graph.ts](file:///d:/claude/pi-ex/underworld-graph/src/world-graph.ts) | 类型安全缺失，重构易出错 | `findNodes` 返回 `GraphRecord[]`，30+ 处 `(x: any)` 改类型化；抽 `asEmbedding` helper 集中 branded type 断言 | ✅ 0.1.1 已修 |
+| A3 | [processEvent](file:///d:/claude/pi-ex/underworld-graph/src/world-graph.ts) 无并发控制，多步异步写并发会交错 | 并发写入导致状态图与日志不一致 | 内部加 `_writeLock` + `withWriteLock` async mutex，拆出 `_processEvent` 私有方法，API 不变 | ✅ 0.1.1 已修 |
+| A4 | [EventLog](file:///d:/claude/pi-ex/underworld-graph/src/event-log.ts) 无 `close()`，与 WorldGraph.close 资源语义不对称 | 调用方无法统一释放资源 | 加 no-op `close()`，WorldGraph.close 调用之 | ✅ 0.1.1 已修 |
+| A5 | README "migrate legacy db schema" 名不副实 | 误导消费方以为有 legacy 数据迁移工具 | 改 README 措辞为 TypeGraph schema version | ✅ 0.1.1 已修 |
+| A6 | typegraph 版本 `^0.40.0` 未锁 minor | minor 升级可能引入不兼容 | `package.json` 改 `~0.40.0`（锁 minor 允许 patch） | ✅ 0.1.1 已修 |
+| A7 | [declaresEdge](file:///d:/claude/pi-ex/underworld-graph/src/world-graph.ts) 定义但从不使用 | 后人误以为是 dead code 删除，触发 schema_hash 变化 | 补注释说明"预留未用，删除会触发 MIGRATION_ERROR"，**不删除** | ✅ 0.1.1 已修 |
 
-### 9.2 待修复（按风险分级）
+### 9.2 B 类：待修复 — 向后兼容的实现优化（5 项）
 
-**B 类（向后兼容的实现优化，零下游影响）**：
+> API 不变，行为更合理，零下游影响。可立即修，但建议先补 P1 测试用例作为安全网。
 
-- valueText 序列化：`String(val)` 对对象/数组变成 `[object Object]`，全文索引失效。
-- EventLog 单行损坏导致整个文件读不出：加 try/catch 跳过损坏行。
-- inferVisibility 无幂等：重复调用产生重复 visibility 记录。
-- birthEntity / processEvent.change 无事务回滚：多步写包 SQLite 事务。
-- killEntity / closeRelation 全表扫描：用 SDK `query()` 按 entityId 索引。
+| # | 问题 | 影响 | 修复方案 | 风险点 |
+|---|---|---|---|---|
+| B1 | [valueText 序列化错误](file:///d:/claude/pi-ex/underworld-graph/src/world-graph.ts) — `String(val)` 对对象/数组变成 `[object Object]` | 全文索引建在错误文本上，对象类 value 无法被检索 | `typeof val === 'object' ? JSON.stringify(val) : String(val)` | valueText 不在公开输出里（评审 P2-8 已记），消费方读不到，零影响 |
+| B2 | [EventLog 单行损坏全文件读不出](file:///d:/claude/pi-ex/underworld-graph/src/event-log.ts) — `readAll` 任意一行 `JSON.parse` 失败会抛错 | 日志文件局部损坏导致整个 `traceBack` / `getAllEvents` 不可用 | `readAll` 加 try/catch 跳过损坏行，记到 stderr | 消费方不太可能依赖"抛错"语义 |
+| B3 | [inferVisibility 无幂等](file:///d:/claude/pi-ex/underworld-graph/src/character-view.ts) — 重复调用同 storyTime 产生重复 visibility 记录 | 同一 (characterId, declarationId) 多条 visibility 记录，查询结果重复 | `setVisibility` 前查重，已存在则跳过 | 消费方不太可能依赖"重复调用产生重复记录" |
+| B4 | [birthEntity / processEvent.change 无事务回滚](file:///d:/claude/pi-ex/underworld-graph/src/world-graph.ts) — 多步写中途失败留下半成品 | Entity 已建但 Fact 没建全，或旧声明已闭合但新声明没写入，状态不一致 | 多步写包 SQLite 事务（better-sqlite3 原生支持同步事务），失败回滚 | 需明确失败时日志语义：建议日志行尾追加 `"_failed": true` 标记，不改原格式 |
+| B5 | [killEntity / closeRelation 全表扫描](file:///d:/claude/pi-ex/underworld-graph/src/world-graph.ts) 等 6 处 — 用 `find()` 取全量再 JS filter | 数据量大后查询慢（O(n) 扫描） | 用 SDK `query()` 按 entityId 索引替代 find() + JS filter | 需先做基准测试确认量级收益 |
 
-**C 类（向后兼容的 API 扩展）**：
+### 9.3 C 类：待修复 — 向后兼容的 API 扩展（4 项）
 
-- migrate 接口签名：接受 `WorldGraphOptions | { dbPath: string }` 两种。
-- getEntityHistory 等支持 `recordedAsOf`。
-- 写入方法加可选 `{ strict: boolean }` 引用完整性校验。
-- 新增 `birthEntityUpsert` / `setVisibilityIfAbsent` 幂等版本。
+> 新增可选参数/方法，原行为不变。可立即修，给消费方提供可选的严格模式 / upsert 入口。
 
-**D 类（需消费方对齐的破坏性修复）**：
+| # | 问题 | 影响 | 修复方案 | 风险点 |
+|---|---|---|---|---|
+| C1 | [migrate 接口签名不一致](file:///d:/claude/pi-ex/underworld-graph/src/world-graph.ts) — `migrate` 只接受 `{ dbPath }`，不接受 `WorldGraphOptions` | 调用方需为 migrate 单独构造参数，与 create 不对称 | migrate 改为接受 `WorldGraphOptions \| { dbPath: string }`，两种都兼容 | 向后兼容 |
+| C2 | [getEntityHistory 等不支持 recordedAsOf](file:///d:/claude/pi-ex/underworld-graph/src/world-graph.ts) — 4 个 history 方法无法做 retcon 隔离查询 | 无法查"某事务时点前的历史快照" | 4 个方法加可选 `opts?: TemporalQueryOpts`，内部走 findNodes | 向后兼容 |
+| C3 | [写入无幂等](file:///d:/claude/pi-ex/underworld-graph/src/world-graph.ts) — birthEntity / setVisibility 重复调用产生重复记录 | 上层重试逻辑会导致数据膨胀 | 新增 `birthEntityUpsert` / `setVisibilityIfAbsent` 等可选方法，原方法不动 | 向后兼容 |
+| C4 | [无引用完整性校验](file:///d:/claude/pi-ex/underworld-graph/src/world-graph.ts) — 写 Fact 时不校验 entityId 是否存在 | 可以为不存在的实体写声明，查询时孤儿声明 | 写入方法加可选 `{ strict?: boolean }` 参数，默认 false 保持原行为 | 向后兼容 |
 
-- storyTime 格式校验（接受格式变化会让消费方现有数据失效）。
-- birth 事件 newFacts 语义（同 property 覆盖、entityId 丢失）。
-- birth 事件保留 modality（当前硬编码 "fact"）。
-- killEntity 级联关 Relation（死亡实体从关系查询消失）。
-- VisibilityNode.state 单值枚举（删字段会改 schema_hash）。
-- 事务时间两套钟统一（recordedAt 字段语义变化）。
+### 9.4 D 类：待修复 — 需消费方对齐的破坏性修复（8 项）
 
-### 9.3 监控建议
+> 改了会触发 MIGRATION_ERROR、改变 SQLite schema、改变公开输出字段、或改变现有调用语义，
+> **必须先与 narrative-engine / novel 消费方对齐**。
+
+| # | 问题 | 影响 | 修复方案 | 对齐难点 |
+|---|---|---|---|---|
+| D1 | storyTime 格式无校验（P1-4） — 任意字符串都接受，依赖字典序比较 | 调用方传入不可比较的格式（如 `2026/8/3`）会让时态过滤错乱 | 加 zod regex 校验，约定格式（如 `act\d+-scene\d+` 或 ISO 日期） | 改接受格式会让消费方现有数据失效 |
+| D2 | birth 事件 newFacts 语义缺陷 — `Object.fromEntries` 同 property 多条互相覆盖；newFacts.entityId 被忽略 | 同一 birth 事件无法给同实体多值属性；跨实体 newFacts 静默丢失 | birthEntity 改为遍历 newFacts 逐条写 Fact，保留 entityId 字段 | 改变 birthEntity 行为，消费方现有调用结果不同 |
+| D3 | birth 事件保留 modality（评审 P2-8） — 当前硬编码 `"fact"` | birth 的 newFacts.modality 字段被忽略，所有诞生声明都是 fact | birthEntity 透传 newFacts.modality | 改变 birth 声明的 modality 分布，characterView 的 modalityFilter 结果变化 |
+| D4 | killEntity 级联关 Relation（评审 P2-8 + 新发现） — 死亡实体的 located_in 关系不自动闭合 | 死亡实体仍出现在关系查询，inferVisibility 仍为死者推断可见性 | killEntity 级联闭合该实体的所有未闭合 Relation | 死亡实体从关系查询消失，inferVisibility 不再推死者声明 |
+| D5 | updateEntitySummary 写事件 + 触发重嵌入（评审 P2-8） — 当前直接覆盖，无事件日志 | summary 变更不可回溯，向量不更新 | 改为写 change 事件 + 触发 updateEntityEmbedding | 新增事件日志行，getAllEvents 结果变化 |
+| D6 | VisibilityNode.state 单值枚举 — 当前只有 `"known"`，字段冗余 | schema 占用但无实际语义 | 删字段会改 schema_hash → MIGRATION_ERROR | 暂保留，等下次 schema 大改时一并清理 |
+| D7 | traceCauses 不存在 eventId 语义 — `causedBy` 指向不存在事件时返回 `[]`，与"无前驱"不可区分 | 调用方无法区分"事件是根因"和"前驱丢失" | 区分：无 causedBy 返回 `[event]`；causedBy 不存在抛错或返回 `null` | 消费方分支逻辑会变 |
+| D8 | 事务时间两套钟统一（评审 P3-11） — EventLog.recordedAt 与 SDK recorded instant 不一致 | 双时态查询的事务时间坐标不统一 | 统一为 SDK recorded instant，EventLog.recordedAt 改为引用之 | recordedAt 字段语义变化，旧日志不一致 |
+
+### 9.5 监控建议
 
 部署后建议在服务层加这些日志/指标：
 
 - `processEvent` 调用频率与延迟分布。
 - `getEntityAt` / `getCharacterView` 查询延迟（数据量大后可能慢）。
-- 事件日志行数增长率（异常增长可能表示上层重复触发）。
+- 事件日志行数增长率（异常增长可能表示上层重复触发，与 B3 幂等问题相关）。
 - SQLite WAL 大小（持续增长不回落可能表示检查点失败）。
+- B 类修复落地后，建议加"损坏日志行计数"指标（对应 B2）。
+- B 类修复落地后，建议加"重复 visibility 跳过计数"指标（对应 B3）。
 
 ---
 
