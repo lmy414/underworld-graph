@@ -1,8 +1,6 @@
 import type { WorldGraph } from "./world-graph.js";
 import type { VisibilityDeclaration, StateDeclaration, Modality } from "./types.js";
 
-const INFINITY = "Infinity";
-
 /**
  * character_view 五步过滤（飞书文档"步骤 5"，2026-07-22 语义修订：知识持续）
  * 1. 查询全部 StateDeclaration（含已闭合——知识不因声明闭合/实体死亡而消失）

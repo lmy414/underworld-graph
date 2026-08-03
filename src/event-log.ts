@@ -37,4 +37,15 @@ export class EventLog {
     }
     return chain;
   }
+
+  /**
+   * 释放资源（no-op）。
+   *
+   * EventLog 当前无内部状态（appendFileSync/readFileSync 直接操作路径），
+   * 但为与 WorldGraph.close() 的资源语义对称提供此方法。未来若改用文件流
+   * 或句柄，此处释放对应资源。
+   */
+  close(): void {
+    // 当前实现无状态，无需释放
+  }
 }

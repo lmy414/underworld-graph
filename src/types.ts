@@ -125,3 +125,12 @@ export type VisibilityDeclaration = z.infer<typeof VisibilityDeclaration>;
  * Task 9 实施前需 fetch 飞书文档"四、关系类型"section 核对
  */
 export const INFRA_RELATIONS: readonly string[] = ["located_in"] as const;
+
+/**
+ * 未闭合哨兵 — validTo = INFINITY 表示声明/关系/可见性当前仍有效。
+ *
+ * 注意：字符串字典序 "I" < "a"，故所有时态比较（validFrom <= t < validTo）
+ * 必须先特判 validTo === INFINITY，否则会误判未闭合记录。
+ * 任何新加的时态过滤路径都应复用此常量，不要重复字面量。
+ */
+export const INFINITY = "Infinity";

@@ -57,8 +57,9 @@ wg.close();
 
 - `WorldGraph.create(opts): Promise<WorldGraph>` — async factory; initializes
   SQLite + sqlite-vec + TypeGraph store.
-- `WorldGraph.migrate(opts): Promise<MigrateResult>` — migrate legacy db schema
-  to current graph definition.
+- `WorldGraph.migrate(opts): Promise<MigrateResult>` — migrate TypeGraph schema
+  version (e.g. after graph definition changes); real legacy data migration
+  is handled by the consumer's importer.
 
 ### Entity lifecycle
 

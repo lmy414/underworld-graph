@@ -17,11 +17,59 @@ import {
 } from "@nicia-ai/typegraph/adapters/drizzle/sqlite";
 import { getActiveSchema, migrateSchema } from "@nicia-ai/typegraph/schema";
 import { z } from "zod";
-import { EntityType, Modality, EventRecord, VisibilitySource } from "./types.js";
+import { EntityType, Modality, EventRecord, VisibilitySource, INFINITY } from "./types.js";
 import type { StateDeclaration, VisibilityDeclaration, EventRecordInput } from "./types.js";
 import { EventLog } from "./event-log.js";
 
-const INFINITY = "Infinity";
+/**
+ * 把 number[] 断言为 SDK 的 EmbeddingValue branded type。
+ *
+ * SDK 的 EmbeddingValue = `readonly number[] & { [EMBEDDING_BRAND]: true }`，
+ * 是编译期 brand，运行时仍是 number[]。embedder 返回 number[]，需经 unknown
+ * 双重断言绕过 brand 检查。集中到此 helper，避免散落的 `as unknown as`。
+ */
+function asEmbedding(vec: number[]): EmbeddingValue {
+  return vec as unknown as EmbeddingValue;
+}
+
+/**
+ * 内部节点记录类型 — SDK 节点 find/scan 返回值的并集。
+ *
+ * SDK 的节点类型是 branded NodeId + mapped type，动态访问
+ * `(this.store.nodes as any)[kind]` 无法保留精确类型，故定义此宽松接口。
+ * 各字段均 optional（不同节点类型字段不同），调用方按需读取。
+ * id 字段：SDK 的 NodeIdentifier = string | {id: string}，故 string 兼容。
+ */
+interface GraphRecord {
+  id: string;
+  // Entity
+  entityId?: string;
+  type?: EntityType;
+  summary?: string;
+  // Fact
+  declarationId?: string;
+  property?: string;
+  value?: unknown;
+  valueText?: string;
+  modality?: Modality;
+  // Relation
+  relationId?: string;
+  sourceId?: string;
+  targetId?: string;
+  label?: string;
+  // Visibility
+  characterId?: string;
+  state?: "known";
+  confidence?: number;
+  source?: VisibilitySource;
+  isExplicit?: boolean;
+  // 公共时态字段（所有节点类型必填）
+  validFrom: string;
+  validTo: string;
+  // SDK 元信息
+  embedding?: EmbeddingValue;
+  meta?: { createdAt?: string; updatedAt?: string };
+}
 
 /**
  * TypeGraph 节点定义 — Entity（实体）与 Fact（状态声明）
@@ -78,6 +126,15 @@ const VisibilityNode = defineNode("Visibility", {
   }),
 });
 
+/**
+ * declares 边（Entity → Fact）— 预留定义，当前未使用。
+ *
+ * 现状：birthEntity / processEvent 写 Fact 时不创建 declares 边，
+ * 查询也不走边遍历。保留定义是为了未来知识图谱遍历需求。
+ *
+ * 注意：删除此边定义会改变 graph schema_hash，触发旧库 MIGRATION_ERROR，
+ * 故即使未用也不要删除，待真正启用或显式走 schema 迁移时再调整。
+ */
 const declaresEdge = defineEdge("declares");
 
 const graph = defineGraph({
@@ -133,6 +190,15 @@ export class WorldGraph {
   private db: Database.Database;
   private store: HistoryStore<typeof graph>;
   private eventLog: EventLog;
+  /**
+   * 写入互斥锁 — processEvent 是多步异步操作（append 日志 + 多次 store 写），
+   * 并发调用会交错导致状态不一致。此 Promise 链保证 processEvent 串行执行。
+   *
+   * 范围说明：当前只锁 processEvent。birthEntity / killEntity / setVisibility 等
+   * 单一写入方法未加锁；若外部混用 processEvent 与这些方法，仍可能交错。
+   * 完整的写入隔离需要消费方自行避免并发混用，或后续扩展锁覆盖所有写入方法。
+   */
+  private _writeLock: Promise<void> = Promise.resolve();
 
   private constructor(
     db: Database.Database,
@@ -142,6 +208,24 @@ export class WorldGraph {
     this.db = db;
     this.store = store;
     this.eventLog = eventLog;
+  }
+
+  /**
+   * 串行执行异步写操作。后续调用会等待前一个完成后再开始。
+   * 仅用于内部 processEvent，不改变公共 API 语义。
+   */
+  private async withWriteLock<T>(fn: () => Promise<T>): Promise<T> {
+    const prev = this._writeLock;
+    let release!: () => void;
+    this._writeLock = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    await prev;
+    try {
+      return await fn();
+    } finally {
+      release();
+    }
   }
 
   /**
@@ -203,6 +287,7 @@ export class WorldGraph {
   }
 
   close(): void {
+    this.eventLog.close();
     this.db.close();
   }
 
@@ -239,17 +324,19 @@ export class WorldGraph {
   private async findNodes(
     kind: "Entity" | "Fact" | "Relation" | "Visibility",
     recordedAsOf?: string,
-  ): Promise<any[]> {
+  ): Promise<GraphRecord[]> {
     if (!recordedAsOf) {
-      return await (this.store.nodes as any)[kind].find();
+      // SDK 的 nodes 是 mapped type，动态 [kind] 访问无法保留精确类型，
+      // 此处 as any 是 SDK 类型边界的已知限制，返回值统一断言为 GraphRecord[]。
+      return await (this.store.nodes as any)[kind].find() as GraphRecord[];
     }
     const view = this.store.asOfRecorded(recordedAsOf as RecordedInstant);
     const collection = (view.nodes as any)[kind];
-    const out: any[] = [];
+    const out: GraphRecord[] = [];
     let after: string | undefined;
     do {
       const page = await collection.scan({ limit: 1000, after });
-      out.push(...page.data);
+      out.push(...(page.data as GraphRecord[]));
       after = page.nextCursor;
     } while (after);
     return out;
@@ -287,7 +374,7 @@ export class WorldGraph {
   async killEntity(entityId: string, storyTime: string): Promise<void> {
     const entities = await this.store.nodes.Entity.find();
     const ent = entities.find(
-      (e: any) => e.entityId === entityId && e.validTo === INFINITY,
+      (e) => e.entityId === entityId && e.validTo === INFINITY,
     );
     if (!ent) throw new Error(`Entity ${entityId} not found or already dead`);
     await this.store.nodes.Entity.update(ent.id, { validTo: storyTime });
@@ -310,7 +397,7 @@ export class WorldGraph {
     // "Infinity" 需特殊处理（字符串比较 'I' < 'a' 导致误判）
     const entities = await this.findNodes("Entity", opts?.recordedAsOf);
     const ent = entities.find(
-      (e: any) =>
+      (e) =>
         e.entityId === entityId &&
         e.validFrom <= storyTime &&
         (e.validTo === INFINITY || storyTime < e.validTo),
@@ -319,13 +406,13 @@ export class WorldGraph {
     const facts = await this.findNodes("Fact", opts?.recordedAsOf);
     const props = facts
       .filter(
-        (f: any) =>
+        (f) =>
           f.entityId === entityId &&
           f.validFrom <= storyTime &&
           (f.validTo === INFINITY || storyTime < f.validTo),
       )
       .map(
-        (f: any) =>
+        (f) =>
           ({
             declarationId: f.declarationId,
             entityId: f.entityId,
@@ -338,7 +425,7 @@ export class WorldGraph {
       );
     return {
       entityId,
-      type: ent.type,
+      type: ent.type!,
       summary: ent.summary ?? "",
       validFrom: ent.validFrom,
       validTo: ent.validTo,
@@ -370,7 +457,7 @@ export class WorldGraph {
   async updateEntitySummary(entityId: string, summary: string): Promise<void> {
     const entities = await this.store.nodes.Entity.find();
     const ent = entities.find(
-      (e: any) => e.entityId === entityId && e.validTo === INFINITY,
+      (e) => e.entityId === entityId && e.validTo === INFINITY,
     );
     if (!ent) throw new Error(`Entity ${entityId} not found or already dead`);
     await this.store.nodes.Entity.update(ent.id, { summary });
@@ -384,8 +471,8 @@ export class WorldGraph {
   ): Promise<void> {
     const rels = await this.store.nodes.Relation.find();
     const rel = rels.find(
-      (r: any) => r.sourceId === sourceId && r.targetId === targetId
-                && r.label === label && r.validTo === INFINITY,
+      (r) => r.sourceId === sourceId && r.targetId === targetId
+            && r.label === label && r.validTo === INFINITY,
     );
     if (!rel) throw new Error(`Relation ${sourceId}-${label}-${targetId} not found or already closed`);
     await this.store.nodes.Relation.update(rel.id, { validTo: storyTime });
@@ -401,22 +488,28 @@ export class WorldGraph {
   }>> {
     const rels = await this.findNodes("Relation", opts?.recordedAsOf);
     return rels
-      .filter((r: any) =>
+      .filter((r) =>
         (r.sourceId === entityId || r.targetId === entityId)
         && r.validFrom <= storyTime
         && (r.validTo === INFINITY || storyTime < r.validTo),
       )
-      .map((r: any) => ({
-        relationId: r.relationId,
-        sourceId: r.sourceId,
-        targetId: r.targetId,
-        label: r.label,
+      .map((r) => ({
+        relationId: r.relationId!,
+        sourceId: r.sourceId!,
+        targetId: r.targetId!,
+        label: r.label!,
         validFrom: r.validFrom,
         validTo: r.validTo,
       }));
   }
 
   async processEvent(input: EventRecordInput): Promise<void> {
+    // 串行化：多步异步写（append 日志 + 多次 store 写）并发会交错，
+    // 用 _writeLock 保证 processEvent 调用依次执行。
+    return this.withWriteLock(() => this._processEvent(input));
+  }
+
+  private async _processEvent(input: EventRecordInput): Promise<void> {
     // 解析并应用默认值（source 缺省为 "engine"），日志中始终落完整记录
     // recordedAt（事务时间轴墙钟）缺省填充当前时间，调用方显式传入时优先
     const event = EventRecord.parse({
@@ -448,7 +541,7 @@ export class WorldGraph {
         for (const inv of event.invalidated ?? []) {
           const facts = await this.store.nodes.Fact.find();
           const oldFact = facts.find(
-            (f: any) => f.declarationId === inv.declarationId && f.validTo === INFINITY,
+            (f) => f.declarationId === inv.declarationId && f.validTo === INFINITY,
           );
           if (oldFact) {
             await this.store.nodes.Fact.update(oldFact.id, { validTo: event.storyTime });
@@ -510,18 +603,18 @@ export class WorldGraph {
   async getVisibilityForCharacter(characterId: string, storyTime: string, opts?: TemporalQueryOpts): Promise<VisibilityDeclaration[]> {
     const all = await this.findNodes("Visibility", opts?.recordedAsOf);
     return all
-      .filter((v: any) => v.characterId === characterId
+      .filter((v) => v.characterId === characterId
         && v.validFrom <= storyTime
         && (v.validTo === INFINITY || storyTime < v.validTo))
-      .map((v: any) => ({
-        characterId: v.characterId,
-        declarationId: v.declarationId,
-        state: v.state,
-        confidence: v.confidence,
-        source: v.source,
+      .map((v) => ({
+        characterId: v.characterId!,
+        declarationId: v.declarationId!,
+        state: v.state!,
+        confidence: v.confidence!,
+        source: v.source!,
         validFrom: v.validFrom,
         validTo: v.validTo,
-        isExplicit: v.isExplicit,
+        isExplicit: v.isExplicit!,
       })) as VisibilityDeclaration[];
   }
 
@@ -533,7 +626,7 @@ export class WorldGraph {
   async closeVisibility(characterId: string, declarationId: string, storyTime: string): Promise<void> {
     const all = await this.store.nodes.Visibility.find();
     const vis = all.find(
-      (v: any) => v.characterId === characterId
+      (v) => v.characterId === characterId
         && v.declarationId === declarationId
         && v.validTo === INFINITY,
     );
@@ -553,32 +646,32 @@ export class WorldGraph {
   ): Promise<VisibilityDeclaration[]> {
     const all = await this.store.nodes.Visibility.find();
     return all
-      .filter((v: any) => v.declarationId === declarationId)
-      .filter((v: any) => !storyTime
+      .filter((v) => v.declarationId === declarationId)
+      .filter((v) => !storyTime
         || (v.validFrom <= storyTime && (v.validTo === INFINITY || storyTime < v.validTo)))
-      .map((v: any) => ({
-        characterId: v.characterId,
-        declarationId: v.declarationId,
-        state: v.state,
-        confidence: v.confidence,
-        source: v.source,
+      .map((v) => ({
+        characterId: v.characterId!,
+        declarationId: v.declarationId!,
+        state: v.state!,
+        confidence: v.confidence!,
+        source: v.source!,
         validFrom: v.validFrom,
         validTo: v.validTo,
-        isExplicit: v.isExplicit,
+        isExplicit: v.isExplicit!,
       })) as VisibilityDeclaration[];
   }
 
   async getAllDeclarationsAt(storyTime: string, opts?: TemporalQueryOpts): Promise<StateDeclaration[]> {
     const facts = await this.findNodes("Fact", opts?.recordedAsOf);
     return facts
-      .filter((f: any) => f.validFrom <= storyTime
+      .filter((f) => f.validFrom <= storyTime
         && (f.validTo === INFINITY || storyTime < f.validTo))
-      .map((f: any) => ({
-        declarationId: f.declarationId,
-        entityId: f.entityId,
-        property: f.property,
+      .map((f) => ({
+        declarationId: f.declarationId!,
+        entityId: f.entityId!,
+        property: f.property!,
         value: f.value,
-        modality: f.modality,
+        modality: f.modality!,
         validFrom: f.validFrom,
         validTo: f.validTo,
       })) as StateDeclaration[];
@@ -591,12 +684,12 @@ export class WorldGraph {
   async getAllDeclarations(opts?: TemporalQueryOpts): Promise<StateDeclaration[]> {
     const facts = await this.findNodes("Fact", opts?.recordedAsOf);
     return facts
-      .map((f: any) => ({
-        declarationId: f.declarationId,
-        entityId: f.entityId,
-        property: f.property,
+      .map((f) => ({
+        declarationId: f.declarationId!,
+        entityId: f.entityId!,
+        property: f.property!,
         value: f.value,
-        modality: f.modality,
+        modality: f.modality!,
         validFrom: f.validFrom,
         validTo: f.validTo,
       })) as StateDeclaration[];
@@ -608,13 +701,13 @@ export class WorldGraph {
   }>> {
     const rels = await this.findNodes("Relation", opts?.recordedAsOf);
     return rels
-      .filter((r: any) => r.validFrom <= storyTime
+      .filter((r) => r.validFrom <= storyTime
         && (r.validTo === INFINITY || storyTime < r.validTo))
-      .map((r: any) => ({
-        relationId: r.relationId,
-        sourceId: r.sourceId,
-        targetId: r.targetId,
-        label: r.label,
+      .map((r) => ({
+        relationId: r.relationId!,
+        sourceId: r.sourceId!,
+        targetId: r.targetId!,
+        label: r.label!,
         validFrom: r.validFrom,
         validTo: r.validTo,
       }));
@@ -637,12 +730,12 @@ export class WorldGraph {
   async getAllEntities(storyTime: string, opts?: TemporalQueryOpts): Promise<EntitySnapshot[]> {
     const entities = await this.findNodes("Entity", opts?.recordedAsOf);
     const valid = entities.filter(
-      (e: any) => e.validFrom <= storyTime
+      (e) => e.validFrom <= storyTime
         && (e.validTo === INFINITY || storyTime < e.validTo),
     );
     const snapshots: EntitySnapshot[] = [];
     for (const ent of valid) {
-      const snap = await this.getEntityAt(ent.entityId, storyTime, opts);
+      const snap = await this.getEntityAt(ent.entityId!, storyTime, opts);
       if (snap) snapshots.push(snap);
     }
     return snapshots;
@@ -669,20 +762,20 @@ export class WorldGraph {
   }> {
     const entities = await this.store.nodes.Entity.find();
     const ents = entities
-      .filter((e: any) => e.entityId === entityId)
-      .map((e: any) => ({
+      .filter((e) => e.entityId === entityId)
+      .map((e) => ({
         entityId: e.entityId,
         type: e.type,
         summary: e.summary ?? "",
         validFrom: e.validFrom,
         validTo: e.validTo,
       }))
-      .sort((a: any, b: any) => a.validFrom.localeCompare(b.validFrom));
+      .sort((a, b) => a.validFrom.localeCompare(b.validFrom));
 
     const facts = await this.store.nodes.Fact.find();
     const allFacts = facts
-      .filter((f: any) => f.entityId === entityId)
-      .map((f: any) => ({
+      .filter((f) => f.entityId === entityId)
+      .map((f) => ({
         declarationId: f.declarationId,
         entityId: f.entityId,
         property: f.property,
@@ -712,8 +805,8 @@ export class WorldGraph {
   }>> {
     const rels = await this.store.nodes.Relation.find();
     return rels
-      .filter((r: any) => !entityId || r.sourceId === entityId || r.targetId === entityId)
-      .map((r: any) => ({
+      .filter((r) => !entityId || r.sourceId === entityId || r.targetId === entityId)
+      .map((r) => ({
         relationId: r.relationId,
         sourceId: r.sourceId,
         targetId: r.targetId,
@@ -736,7 +829,8 @@ export class WorldGraph {
       times.add(e.storyTime);
     }
     for (const nodeName of ["Entity", "Fact", "Relation", "Visibility"] as const) {
-      const records = await (this.store.nodes as any)[nodeName].find();
+      // SDK nodes 是 mapped type，动态 [nodeName] 访问需 as any（SDK 类型边界已知限制）
+      const records = await (this.store.nodes as any)[nodeName].find() as GraphRecord[];
       for (const r of records) {
         if (r.validFrom && r.validFrom !== INFINITY) times.add(r.validFrom);
         if (r.validTo && r.validTo !== INFINITY) times.add(r.validTo);
@@ -755,7 +849,7 @@ export class WorldGraph {
    * 若需"当前态"语义应改用 INFINITY 查询。当前遵循 Task 0.2 规格用 validFrom。
    *
    * embedding 字段在 SDK 中是 branded type（EmbeddingValue），embedder 返回 number[]，
-   * 此处经 unknown 双重断言绕过 brand 检查（运行时仍为 number[]）。
+   * 经 asEmbedding helper 集中处理双重断言（运行时仍为 number[]）。
    */
   async reembedAll(embedder: {
     embedEntity(snap: EntitySnapshot): Promise<number[]>;
@@ -767,7 +861,7 @@ export class WorldGraph {
       if (snap) {
         const vec = await embedder.embedEntity(snap);
         await this.store.nodes.Entity.update(ent.id, {
-          embedding: vec as unknown as EmbeddingValue,
+          embedding: asEmbedding(vec),
         });
       }
     }
@@ -785,7 +879,7 @@ export class WorldGraph {
       };
       const vec = await embedder.embedFact(decl);
       await this.store.nodes.Fact.update(f.id, {
-        embedding: vec as unknown as EmbeddingValue,
+        embedding: asEmbedding(vec),
       });
     }
   }
@@ -810,7 +904,7 @@ export class WorldGraph {
     const fact = facts.find((f) => f.declarationId === declarationId);
     if (!fact) return; // 静默跳过（兼容性，不抛错）
     await this.store.nodes.Fact.update(fact.id, {
-      embedding: embedding as unknown as EmbeddingValue,
+      embedding: asEmbedding(embedding),
     });
   }
 
@@ -831,7 +925,7 @@ export class WorldGraph {
     );
     if (!ent) return; // 静默跳过（兼容性）
     await this.store.nodes.Entity.update(ent.id, {
-      embedding: embedding as unknown as EmbeddingValue,
+      embedding: asEmbedding(embedding),
     });
   }
 }
