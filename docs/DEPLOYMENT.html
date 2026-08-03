@@ -1,0 +1,1876 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>underworld-graph 部署与源码指南 · v0.1.1</title>
+<style>
+  :root {
+    --bg: #fafafa;
+    --fg: #1a1a1a;
+    --muted: #666;
+    --accent: #0366d6;
+    --border: #e1e4e8;
+    --code-bg: #f6f8fa;
+    --code-fg: #24292e;
+    --table-stripe: #f9f9f9;
+    --warn-bg: #fff8e1;
+    --warn-border: #ffc107;
+    --tip-bg: #e3f2fd;
+    --tip-border: #2196f3;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #0d1117;
+      --fg: #e6edf3;
+      --muted: #8b949e;
+      --accent: #58a6ff;
+      --border: #30363d;
+      --code-bg: #161b22;
+      --code-fg: #e6edf3;
+      --table-stripe: #161b22;
+      --warn-bg: #2a1f00;
+      --warn-border: #bd8b00;
+      --tip-bg: #0c2233;
+      --tip-border: #1f6feb;
+    }
+  }
+  * { box-sizing: border-box; }
+  html { scroll-behavior: smooth; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC",
+                 "Microsoft YaHei", Helvetica, Arial, sans-serif;
+    font-size: 16px;
+    line-height: 1.7;
+    color: var(--fg);
+    background: var(--bg);
+    margin: 0;
+    padding: 0;
+  }
+  .layout {
+    display: grid;
+    grid-template-columns: 260px 1fr;
+    max-width: 1400px;
+    margin: 0 auto;
+  }
+  nav.toc {
+    position: sticky;
+    top: 0;
+    align-self: start;
+    max-height: 100vh;
+    overflow-y: auto;
+    padding: 24px 16px;
+    border-right: 1px solid var(--border);
+    font-size: 14px;
+  }
+  nav.toc h2 {
+    font-size: 13px;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    color: var(--muted);
+    margin: 16px 0 8px;
+  }
+  nav.toc ul { list-style: none; padding-left: 12px; margin: 0; }
+  nav.toc li { margin: 4px 0; }
+  nav.toc a {
+    color: var(--fg);
+    text-decoration: none;
+    display: block;
+    padding: 2px 6px;
+    border-radius: 4px;
+    transition: background 0.15s;
+  }
+  nav.toc a:hover { background: var(--code-bg); color: var(--accent); }
+  main {
+    padding: 32px 48px 96px;
+    min-width: 0;
+  }
+  h1 {
+    font-size: 28px;
+    border-bottom: 2px solid var(--border);
+    padding-bottom: 12px;
+    margin-top: 0;
+  }
+  h2 {
+    font-size: 22px;
+    margin-top: 48px;
+    border-bottom: 1px solid var(--border);
+    padding-bottom: 8px;
+  }
+  h3 { font-size: 18px; margin-top: 32px; }
+  h4 { font-size: 16px; margin-top: 24px; }
+  p { margin: 12px 0; }
+  a { color: var(--accent); }
+  code {
+    font-family: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
+    background: var(--code-bg);
+    color: var(--code-fg);
+    padding: 2px 6px;
+    border-radius: 3px;
+    font-size: 0.9em;
+  }
+  pre {
+    background: var(--code-bg);
+    color: var(--code-fg);
+    padding: 16px;
+    border-radius: 6px;
+    overflow-x: auto;
+    border: 1px solid var(--border);
+    font-size: 13px;
+    line-height: 1.5;
+  }
+  pre code { background: transparent; padding: 0; font-size: inherit; }
+  table {
+    border-collapse: collapse;
+    width: 100%;
+    margin: 16px 0;
+    font-size: 14px;
+  }
+  th, td {
+    border: 1px solid var(--border);
+    padding: 8px 12px;
+    text-align: left;
+    vertical-align: top;
+  }
+  th { background: var(--code-bg); font-weight: 600; }
+  tr:nth-child(even) td { background: var(--table-stripe); }
+  blockquote {
+    border-left: 4px solid var(--accent);
+    padding: 8px 16px;
+    margin: 16px 0;
+    background: var(--tip-bg);
+    color: var(--fg);
+  }
+  .warn {
+    border-left: 4px solid var(--warn-border);
+    background: var(--warn-bg);
+    padding: 12px 16px;
+    margin: 16px 0;
+    border-radius: 0 4px 4px 0;
+  }
+  .meta {
+    display: flex;
+    gap: 16px;
+    flex-wrap: wrap;
+    font-size: 13px;
+    color: var(--muted);
+    padding: 8px 0;
+  }
+  .meta span { display: inline-flex; align-items: center; gap: 4px; }
+  .badge {
+    display: inline-block;
+    padding: 2px 8px;
+    border-radius: 12px;
+    background: var(--accent);
+    color: white;
+    font-size: 11px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+  }
+  .maint-note {
+    border: 2px dashed var(--warn-border);
+    background: var(--warn-bg);
+    padding: 16px;
+    border-radius: 6px;
+    margin: 24px 0;
+  }
+  .maint-note strong { color: var(--warn-border); }
+  hr { border: none; border-top: 1px solid var(--border); margin: 32px 0; }
+  .anchor { display: block; position: relative; top: -80px; visibility: hidden; }
+  @media (max-width: 900px) {
+    .layout { grid-template-columns: 1fr; }
+    nav.toc {
+      position: relative;
+      max-height: none;
+      border-right: none;
+      border-bottom: 1px solid var(--border);
+    }
+    main { padding: 24px 16px 64px; }
+  }
+</style>
+</head>
+<body>
+<div class="layout">
+
+<nav class="toc">
+  <h2>导航</h2>
+  <ul>
+    <li><a href="#top">顶部</a></li>
+    <li><a href="#sec-1">1. 包定位与架构</a></li>
+    <li><a href="#sec-2">2. 服务器部署流程</a></li>
+    <li><a href="#sec-3">3. 依赖与运行时</a></li>
+    <li><a href="#sec-4">4. 目录结构</a></li>
+    <li><a href="#sec-5">5. 逐文件源码解析</a></li>
+    <li><a href="#sec-5-1">5.1 package.json</a></li>
+    <li><a href="#sec-5-2">5.2 tsconfig.json</a></li>
+    <li><a href="#sec-5-3">5.3 .gitignore</a></li>
+    <li><a href="#sec-5-4">5.4 src/index.ts</a></li>
+    <li><a href="#sec-5-5">5.5 src/types.ts</a></li>
+    <li><a href="#sec-5-6">5.6 src/event-log.ts</a></li>
+    <li><a href="#sec-5-7">5.7 src/character-view.ts</a></li>
+    <li><a href="#sec-5-8">5.8 src/world-graph.ts</a></li>
+    <li><a href="#sec-5-9">5.9 scripts/smoke.mjs</a></li>
+    <li><a href="#sec-5-10">5.10 CI 流水线</a></li>
+    <li><a href="#sec-6">6. API 速查表</a></li>
+    <li><a href="#sec-7">7. 数据模型</a></li>
+    <li><a href="#sec-8">8. 运维与备份</a></li>
+    <li><a href="#sec-9">9. 已知问题</a></li>
+    <li><a href="#app-a">附录 A: Quick Start</a></li>
+    <li><a href="#app-b">附录 B: 环境变量</a></li>
+    <li><a href="#app-c">附录 C: 发布清单</a></li>
+  </ul>
+</nav>
+
+<main>
+<span class="anchor" id="top"></span>
+<h1>underworld-graph 部署与源码指南</h1>
+
+<div class="meta">
+  <span>版本：<code>0.1.1</code></span>
+  <span>协议：GPL-3.0-only</span>
+  <span>作者：lmy414</span>
+  <span>npm 包名：<code>underworld-graph</code></span>
+</div>
+
+<blockquote>
+  本文档面向"要把这个包部署到自己服务器并理解每行代码"的工程师。逐文件、逐 token
+  解读源码，标注每个 import / 类型 / 函数 / 关键语句的语义、设计意图与已知边界。
+</blockquote>
+
+<div class="maint-note">
+  <strong>维护约定（2026-08-03 起）</strong>
+  <p>
+    本 HTML 文档与同目录的 <code>DEPLOYMENT.md</code> 是<strong>同一份内容的两种形态</strong>。
+    每次更新文档内容时，<strong>必须同步更新两者</strong>：
+  </p>
+  <ol>
+    <li>先改 <code>docs/DEPLOYMENT.md</code>（源）</li>
+    <li>再用本 HTML 的同名文件覆盖（<code>docs/DEPLOYMENT.html</code>）</li>
+    <li>两者在同一 commit 内提交，commit message 标注 <code>docs:</code> 前缀</li>
+    <li>HTML 是自包含单页（内嵌 CSS，无外部依赖），可直接部署到任意静态服务器</li>
+  </ol>
+  <p>
+    验证方法：HTML 顶部"对应版本"字段必须与 <code>package.json</code> 的
+    <code>version</code> 一致；底部"文档版本"commit hash 必须与当前 HEAD 一致。
+  </p>
+</div>
+
+<h2>目录</h2>
+<ol>
+  <li><a href="#sec-1">包定位与架构概览</a></li>
+  <li><a href="#sec-2">服务器部署完整流程</a></li>
+  <li><a href="#sec-3">依赖与运行时要求</a></li>
+  <li><a href="#sec-4">目录结构</a></li>
+  <li><a href="#sec-5">逐文件源码解析</a></li>
+  <li><a href="#sec-6">API 速查表</a></li>
+  <li><a href="#sec-7">数据模型与存储布局</a></li>
+  <li><a href="#sec-8">运维与备份</a></li>
+  <li><a href="#sec-9">已知问题与后续路线</a></li>
+</ol>
+
+<span class="anchor" id="sec-1"></span>
+<h2>1. 包定位与架构概览</h2>
+
+<p>
+  <code>underworld-graph</code> 是一个<strong>双时态叙事状态图库</strong>（bi-temporal narrative state graph），
+  为虚构创作引擎提供数据底座。三个关键能力：
+</p>
+
+<ul>
+  <li>
+    <strong>双时态</strong>：每条状态声明都携带 <code>validFrom</code> / <code>validTo</code>（故事时间轴）和 <code>recordedAt</code>
+    （事务时间轴），可查询"故事时刻 X 时的世界状态，但只含墙钟 Y 之前写入的内容"
+    （retcon 隔离）。
+  </li>
+  <li>
+    <strong>事件溯源</strong>：所有写入走 <code>processEvent</code>，先 append JSONL 日志（含 <code>causedBy</code> 因果链），
+    再扩散到状态图，可沿因果链回溯任何变更的起源。
+  </li>
+  <li>
+    <strong>可见性追踪</strong>：每个角色对每条声明独立持有可见性记录，区分"自产自知 / 他人告知 /
+    基础设施推断"三种来源，支持"角色 A 知道什么"的查询。
+  </li>
+</ul>
+
+<p>技术栈分层：</p>
+
+<pre><code>┌─────────────────────────────────────────────────┐
+│ 消费方（narrative-engine / visualizer / 导入器）│
+├─────────────────────────────────────────────────┤
+│        underworld-graph（本包，纯库）            │
+│  WorldGraph / EventLog / characterView          │
+├─────────────────────────────────────────────────┤
+│  @nicia-ai/typegraph（双时态图 SDK）            │
+│  HistoryStore + searchable/embedding 字段        │
+├─────────────────────────────────────────────────┤
+│  drizzle-orm（SQLite ORM 适配层）               │
+├─────────────────────────────────────────────────┤
+│  better-sqlite3 + sqlite-vec（原生 SQLite + 向量扩展）│
+├─────────────────────────────────────────────────┤
+│  SQLite 数据库文件（world.db + events.jsonl）   │
+└─────────────────────────────────────────────────┘</code></pre>
+
+<div class="warn">
+  <strong>重要：本包是纯库，不是服务。</strong> 它不监听端口、不暴露 HTTP，只导出一个 Node.js
+  ESM 模块。消费方负责文件路径管理、HTTP 层、并发调度。服务器部署本质上是
+  "装 Node + 装依赖 + 让你的服务进程引用本包"。
+</div>
+
+<span class="anchor" id="sec-2"></span>
+<h2>2. 服务器部署完整流程</h2>
+
+<h3>2.1 环境准备</h3>
+
+<pre><code># 1. Node.js >= 20（强烈建议 22 LTS）
+node --version    # 应输出 v20.x 或 v22.x
+
+# 2. Python 3 + 构建工具（better-sqlite3 是原生模块，需 node-gyp 编译）
+#    Linux 服务器：
+sudo apt-get install -y python3 make g++
+#    macOS（开发机）：
+# xcode-select --install
+
+# 3. npm（随 Node 自带）
+npm --version</code></pre>
+
+<h3>2.2 选择部署形态</h3>
+
+<table>
+  <thead>
+    <tr><th>形态</th><th>适用场景</th><th>关键步骤</th></tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td><strong>A. 作为依赖集成到你的服务</strong></td>
+      <td>生产推荐</td>
+      <td>你的服务 <code>package.json</code> 加 <code>"underworld-graph": "0.1.1"</code>，自己的进程管 SQLite 文件路径</td>
+    </tr>
+    <tr>
+      <td><strong>B. 从源码克隆自部署</strong></td>
+      <td>调试 / 二次开发</td>
+      <td><code>git clone</code> + <code>npm install</code> + <code>npm run build</code>，再被你的服务以 file: 引用</td>
+    </tr>
+    <tr>
+      <td><strong>C. 纯 npm 安装验证</strong></td>
+      <td>试用</td>
+      <td><code>npm install underworld-graph</code> 后写脚本调用</td>
+    </tr>
+  </tbody>
+</table>
+
+<h3>2.3 形态 A：作为依赖集成到你的服务（推荐）</h3>
+
+<p>在你的服务目录：</p>
+
+<pre><code>cd /opt/your-service
+npm install underworld-graph@0.1.1
+# 此时 better-sqlite3 + sqlite-vec 会被自动编译</code></pre>
+
+<p>你的服务代码：</p>
+
+<pre><code>// your-service/src/world.ts
+import { WorldGraph } from "underworld-graph";
+import path from "node:path";
+
+const DATA_DIR = process.env.WG_DATA_DIR ?? "/var/lib/your-service/world";
+
+export const wg = await WorldGraph.create({
+  dbPath: path.join(DATA_DIR, "world.db"),
+  eventLogPath: path.join(DATA_DIR, "events.jsonl"),
+});
+
+// 优雅关闭：进程退出时释放 SQLite 句柄
+process.on("SIGTERM", () =&gt; {
+  wg.close();
+  process.exit(0);
+});</code></pre>
+
+<p>目录权限：</p>
+
+<pre><code>sudo mkdir -p /var/lib/your-service/world
+sudo chown -R your-service:your-service /var/lib/your-service/world</code></pre>
+
+<h3>2.4 形态 B：从源码克隆自部署</h3>
+
+<pre><code># 1. 克隆
+git clone git@github.com:lmy414/underworld-graph.git
+cd underworld-graph
+git checkout v0.1.1   # 或 master
+
+# 2. 装依赖（会编译 better-sqlite3 原生模块）
+npm install
+
+# 3. 构建（tsc 编译 src/ → dist/）
+npm run build
+
+# 4. 跑测试验证环境（59 个用例，约 10 秒）
+npm test
+
+# 5. 你的服务以 file: 引用
+cd /opt/your-service
+npm install /path/to/underworld-graph</code></pre>
+
+<h3>2.5 systemd 服务单元示例</h3>
+
+<p><code>/etc/systemd/system/your-service.service</code>：</p>
+
+<pre><code>[Unit]
+Description=Your Narrative Service (uses underworld-graph)
+After=network.target
+
+[Service]
+Type=simple
+User=your-service
+WorkingDirectory=/opt/your-service
+Environment=NODE_ENV=production
+Environment=WG_DATA_DIR=/var/lib/your-service/world
+ExecStart=/usr/bin/node dist/main.js
+Restart=on-failure
+RestartSec=5
+# 关键：SQLite 单写者，不要起多实例指向同一 db 文件
+# 若要多进程，每个进程用独立 dbPath
+
+[Install]
+WantedBy=multi-user.target</code></pre>
+
+<p>启用：</p>
+
+<pre><code>sudo systemctl daemon-reload
+sudo systemctl enable --now your-service
+sudo journalctl -u your-service -f</code></pre>
+
+<h3>2.6 反向代理（可选）</h3>
+
+<p>本包不暴露 HTTP。若你的服务用 Express/Fastify：</p>
+
+<pre><code>server {
+  listen 443 ssl http2;
+  server_name narrative.example.com;
+
+  ssl_certificate     /etc/letsencrypt/live/narrative.example.com/fullchain.pem;
+  ssl_certificate_key /etc/letsencrypt/live/narrative.example.com/privkey.pem;
+
+  location / {
+    proxy_pass http://127.0.0.1:7421;
+    proxy_set_header Host $host;
+    proxy_set_header X-Real-IP $remote_addr;
+    proxy_read_timeout 300s;   # LLM 调用可能慢
+  }
+}</code></pre>
+
+<h3>2.7 部署后冒烟验证</h3>
+
+<pre><code># 1. 进程存活
+systemctl status your-service
+
+# 2. db 文件已创建
+ls -la /var/lib/your-service/world/
+# 应看到 world.db, world.db-wal, world.db-shm, events.jsonl
+
+# 3. 调用你的服务的健康检查端点（如有）
+curl http://127.0.0.1:7421/health
+
+# 4. 跑包自带的冒烟脚本（仅形态 B 可用）
+cd /path/to/underworld-graph
+npm run smoke
+# 预期输出结尾："✅ 端到端冒烟全部通过"</code></pre>
+
+<span class="anchor" id="sec-3"></span>
+<h2>3. 依赖与运行时要求</h2>
+
+<h3>3.1 运行时依赖（<code>dependencies</code>）</h3>
+
+<table>
+  <thead>
+    <tr><th>包</th><th>版本约束</th><th>用途</th><th>备注</th></tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td><code>@nicia-ai/typegraph</code></td>
+      <td><code>~0.40.0</code></td>
+      <td>双时态图 SDK，提供 HistoryStore / searchable / embedding / schema migration</td>
+      <td>锁 minor 允许 patch；SDK 内部依赖 drizzle</td>
+    </tr>
+    <tr>
+      <td><code>better-sqlite3</code></td>
+      <td><code>^11.0.0</code></td>
+      <td>同步 SQLite 原生绑定</td>
+      <td><strong>需 node-gyp 编译</strong>，部署机要有 Python 3 + C++ 编译器</td>
+    </tr>
+    <tr>
+      <td><code>drizzle-orm</code></td>
+      <td><code>^0.36.0</code></td>
+      <td>SQLite ORM 适配层</td>
+      <td>typegraph SDK 通过它对接 better-sqlite3</td>
+    </tr>
+    <tr>
+      <td><code>sqlite-vec</code></td>
+      <td><code>^0.1.9</code></td>
+      <td>SQLite 向量扩展</td>
+      <td>提供向量索引与相似度检索，运行时 <code>load</code> 进 db 连接</td>
+    </tr>
+    <tr>
+      <td><code>zod</code></td>
+      <td><code>^4.0.0</code></td>
+      <td>运行时 schema 校验</td>
+      <td>所有公共类型都先用 zod 定义再 infer 出 TS 类型</td>
+    </tr>
+  </tbody>
+</table>
+
+<h3>3.2 开发依赖（<code>devDependencies</code>）</h3>
+
+<table>
+  <thead><tr><th>包</th><th>版本</th><th>用途</th></tr></thead>
+  <tbody>
+    <tr><td><code>@types/better-sqlite3</code></td><td><code>^7.6.0</code></td><td>better-sqlite3 的 TypeScript 类型</td></tr>
+    <tr><td><code>tsx</code></td><td><code>^4.0.0</code></td><td>直接跑 .ts 测试，无需预编译</td></tr>
+    <tr><td><code>typescript</code></td><td><code>^5.5.0</code></td><td>tsc 编译 + 类型检查</td></tr>
+  </tbody>
+</table>
+
+<h3>3.3 引擎约束</h3>
+
+<pre><code>"engines": { "node": "&gt;=20" }</code></pre>
+
+<p>Node 20 是硬下限（CI 在 20 和 22 上跑）。低于 20 不保证。</p>
+
+<h3>3.4 原生模块编译注意</h3>
+
+<p><code>better-sqlite3</code> 是 C++ 原生模块。三种安装路径：</p>
+
+<ol>
+  <li><strong>预编译二进制</strong>（最常见）：npm 装包时下载预编译的 <code>.node</code> 文件，秒装。</li>
+  <li><strong>源码编译</strong>：预编译二进制不可用时（如 musl libc 的 Alpine），fallback 到 <code>node-gyp</code> 编译，需要 Python 3 + make + C++。</li>
+  <li><strong>Docker 部署</strong>：基于 Alpine 镜像时建议换 debian-slim，或显式装 <code>python3 make g++</code>。</li>
+</ol>
+
+<p>Dockerfile 片段（debian-slim 基底）：</p>
+
+<pre><code>FROM node:22-slim
+RUN apt-get update &amp;&amp; apt-get install -y python3 make g++ &amp;&amp; rm -rf /var/lib/apt/lists/*
+WORKDIR /app
+COPY package*.json ./
+RUN npm ci --omit=dev
+COPY . .
+USER node
+CMD ["node", "dist/main.js"]</code></pre>
+
+<span class="anchor" id="sec-4"></span>
+<h2>4. 目录结构</h2>
+
+<pre><code>underworld-graph/
+├── .github/
+│   └── workflows/
+│       └── ci.yml              # GitHub Actions：test (Node 20/22) + publish (tag 触发)
+├── docs/
+│   ├── design-review-2026-08-02.md   # 设计评审存档（14 项问题清单）
+│   ├── DEPLOYMENT.md           # 本文档 Markdown 源
+│   └── DEPLOYMENT.html         # 本文档 HTML 形态（自包含单页）
+├── scripts/
+│   └── smoke.mjs               # 端到端冒烟脚本（Macbeth 故事片段）
+├── src/                        # 源码（编译单元 rootDir）
+│   ├── index.ts                # 公共导出清单
+│   ├── types.ts                # zod schema + 类型常量
+│   ├── event-log.ts            # JSONL 事件日志
+│   ├── character-view.ts       # 角色视角 + 可见性推断
+│   └── world-graph.ts          # 核心引擎（最大文件，931 行）
+├── tests/                      # 12 个测试文件，59 个用例
+│   ├── api.test.ts             # 公共 API 暴露面
+│   ├── character-view.test.ts  # 角色视角
+│   ├── entities.test.ts        # 实体生命周期
+│   ├── events.test.ts          # 事件日志 + 因果链
+│   ├── index.test.ts           # 导出清单
+│   ├── migrate.test.ts         # schema 迁移
+│   ├── query.test.ts           # 双时态查询
+│   ├── schema.test.ts          # zod schema 校验
+│   ├── search.test.ts          # 全文 / 向量 / 混合检索
+│   ├── temporal.test.ts        # recordedAsOf retcon 隔离
+│   ├── types.test.ts           # 枚举类型校验
+│   └── visibility.test.ts      # 可见性声明
+├── .gitignore
+├── CHANGELOG.md
+├── LICENSE                     # GPL-3.0-only
+├── README.md
+├── package.json
+├── package-lock.json
+└── tsconfig.json</code></pre>
+
+<p><strong>构建产物</strong>：<code>npm run build</code> 后生成 <code>dist/</code>，结构与 <code>src/</code> 一致但扩展名为 <code>.js</code> + <code>.d.ts</code>。<code>.gitignore</code> 排除 <code>dist/</code>，不在仓库内提交。</p>
+
+<span class="anchor" id="sec-5"></span>
+<h2>5. 逐文件源码解析</h2>
+
+<blockquote>
+  解读约定：每个文件先给"职责一句话"，再按 token 顺序逐段拆。引用源码用行号锚定。
+</blockquote>
+
+<span class="anchor" id="sec-5-1"></span>
+<h3>5.1 <code>package.json</code></h3>
+
+<p><strong>职责</strong>：npm 包元数据 + 脚本入口 + 依赖锁定。</p>
+
+<p>逐字段：</p>
+
+<ul>
+  <li><code>name</code>: <code>"underworld-graph"</code> — npm 包名（无 scope，公开包）。</li>
+  <li><code>version</code>: <code>"0.1.1"</code> — 当前发布版本。</li>
+  <li><code>description</code>: <code>"Bi-temporal narrative state graph for fiction-writing engines."</code> — 一句话定位。</li>
+  <li><code>keywords</code>: 8 个发现关键词：<code>narrative / story / graph / bi-temporal / sqlite / knowledge-graph / fiction / worldbuilding</code>。</li>
+  <li><code>license</code>: <code>"GPL-3.0-only"</code> — 强 copyleft，下游使用需注意传染性。</li>
+  <li><code>author</code>: <code>"lmy414"</code>。</li>
+  <li><code>repository.url</code>: <code>"git+https://github.com/lmy414/underworld-graph.git"</code> — GitHub 仓库地址（注意：实际 push 时可能改用 SSH，见部署章节）。</li>
+  <li><code>private</code>: <code>false</code> — 公开发布。</li>
+  <li><code>type</code>: <code>"module"</code> — <strong>ESM 模块系统</strong>，所有 <code>.js</code> 文件按 ES module 处理。</li>
+  <li><code>main</code>: <code>"./dist/index.js"</code> — CommonJS 入口（虽是 ESM 但保留 main 兼容旧解析器）。</li>
+  <li><code>types</code>: <code>"./dist/index.d.ts"</code> — TS 类型入口。</li>
+  <li><code>exports</code>：现代模块解析入口，优先 <code>types</code> 再 <code>import</code>，只暴露 <code>.</code>（根导出），不暴露子路径，强制消费方走公共 API。</li>
+  <li><code>scripts</code>：
+    <ul>
+      <li><code>build</code>: <code>tsc</code> — 编译 <code>src/</code> → <code>dist/</code>。</li>
+      <li><code>test</code>: <code>tsx --test tests/*.test.ts</code> — 用 Node 内置 test runner，tsx 直跑 .ts。</li>
+      <li><code>typecheck</code>: <code>tsc --noEmit</code> — 仅类型检查，不产出。</li>
+      <li><code>smoke</code>: <code>tsx scripts/smoke.mjs</code> — 跑端到端冒烟。</li>
+      <li><code>prepare</code>: <code>npm run build</code> — npm install 后自动编译（含 npm publish 时）。</li>
+      <li><code>prepublishOnly</code>: <code>npm run build &amp;&amp; npm test</code> — 发布前强制跑 build + 测试，失败则阻止发布。</li>
+    </ul>
+  </li>
+  <li><code>files</code>: <code>["dist/", "src/", "README.md", "CHANGELOG.md", "LICENSE"]</code> — 发布到 npm 的文件白名单。注意 <code>src/</code> 也被打包，方便消费方读源码调试。</li>
+  <li><code>dependencies</code> / <code>devDependencies</code>：见 <a href="#sec-3">§3</a>。</li>
+  <li><code>engines.node</code>: <code>"&gt;=20"</code> — 硬约束。</li>
+</ul>
+
+<span class="anchor" id="sec-5-2"></span>
+<h3>5.2 <code>tsconfig.json</code></h3>
+
+<p><strong>职责</strong>：TypeScript 编译配置。</p>
+
+<p>逐选项：</p>
+
+<ul>
+  <li><code>target</code>: <code>"ES2022"</code> — 输出 JS 语法目标，支持顶层 await、class fields 等。</li>
+  <li><code>module</code>: <code>"ESNext"</code> — 输出 ESM 模块格式。</li>
+  <li><code>moduleResolution</code>: <code>"bundler"</code> — 模块解析策略，匹配现代打包器/Node ESM。</li>
+  <li><code>outDir</code>: <code>"./dist"</code> — 编译产物目录。</li>
+  <li><code>rootDir</code>: <code>"./src"</code> — 源码根目录，限制编译范围。</li>
+  <li><code>strict</code>: <code>true</code> — 全量严格模式（noImplicitAny / strictNullChecks 等）。</li>
+  <li><code>esModuleInterop</code>: <code>true</code> — 允许默认导入 CommonJS 模块。</li>
+  <li><code>skipLibCheck</code>: <code>true</code> — 跳过 .d.ts 文件类型检查（加速编译）。</li>
+  <li><code>forceConsistentCasingInFileNames</code>: <code>true</code> — 强制文件名大小写一致（跨平台）。</li>
+  <li><code>declaration</code>: <code>true</code> — 生成 <code>.d.ts</code>。</li>
+  <li><code>emitDeclarationOnly</code>: <code>false</code> — 同时生成 <code>.js</code> 和 <code>.d.ts</code>。</li>
+  <li><code>allowImportingTsExtensions</code>: <code>false</code> — 不允许 <code>.ts</code> 扩展名 import，故源码里写 <code>.js</code> 后缀（ESM 约定）。</li>
+  <li><code>declarationMap</code> / <code>sourceMap</code>: <code>false</code> — 不生成 source map（产物精简）。</li>
+  <li><code>resolveJsonModule</code>: <code>true</code> — 允许 import JSON。</li>
+  <li><code>isolatedModules</code>: <code>true</code> — 每个文件独立编译（匹配 tsx / esbuild 行为）。</li>
+  <li><code>verbatimModuleSyntax</code>: <code>false</code> — 不强制 type-only import 显式标记。</li>
+  <li><code>include</code>: <code>["src/**/*"]</code> — 编译单元只含 src/。</li>
+  <li><code>exclude</code>: <code>["tests", "scripts", "dist", "node_modules"]</code> — 排除测试和产物。</li>
+</ul>
+
+<span class="anchor" id="sec-5-3"></span>
+<h3>5.3 <code>.gitignore</code></h3>
+
+<p><strong>职责</strong>：排除不应进 git 的文件。</p>
+
+<pre><code>data/           # 本地试验数据
+dist/           # 编译产物
+node_modules/   # 依赖
+*.db            # SQLite 数据库文件
+*.db-wal       # SQLite WAL 日志
+*.db-shm       # SQLite 共享内存
+*.tsbuildinfo  # tsc 增量编译缓存</code></pre>
+
+<p>关键点：<strong>db 文件不进 git</strong>。部署时由运行时创建，备份策略另定（见 <a href="#sec-8">§8</a>）。</p>
+
+<span class="anchor" id="sec-5-4"></span>
+<h3>5.4 <code>src/index.ts</code> — 公共导出清单</h3>
+
+<p><strong>职责</strong>：包的对外门面，决定哪些符号是稳定公共 API、哪些是内部试探性导出。</p>
+
+<p>源码逐段：</p>
+
+<pre><code>// 行 1-7：注释说明软隔离约定
+// 公共 API 出口（飞书文档"四、模块导出清单"）
+// 内部实现文件（world-graph.ts/event-log.ts/character-view.ts）不直接导出
+//
+// 软隔离约定（2026-07-29）：
+// - 无前缀导出 = 公共 API，其他子包与扩展层可直接引用
+// - _ 前缀导出 = 包内部实现，不保证稳定，外部不应依赖</code></pre>
+
+<p>设计意图：消费方<strong>只能 <code>import { ... } from "underworld-graph"</code></strong>，不能直接 <code>import { EventLog } from "underworld-graph/event-log"</code>（<code>exports</code> 字段不暴露子路径）。内部文件不直接被外部引用，方便重构。</p>
+
+<pre><code>// 行 11-12：公共类与类型
+export { WorldGraph } from "./world-graph.js";
+export type { EntitySnapshot, MigrateResult } from "./world-graph.js";</code></pre>
+
+<p><code>WorldGraph</code> 是值导出（类），<code>EntitySnapshot</code> / <code>MigrateResult</code> 是类型导出（<code>export type</code> 避免运行时副作用）。</p>
+
+<pre><code>// 行 16-23：Zod schema 同时导出值和类型
+export {
+  EntityType,
+  Modality,
+  EventType,
+  StateDeclaration,
+  EventRecord,
+} from "./types.js";
+export type { EventRecordInput } from "./types.js";</code></pre>
+
+<p>注释解释：<code>export { X }</code> 已同时导出值（运行时 <code>.parse()</code>）和类型，无需再 <code>export type { X }</code>，否则 TS2300 重复标识符。<code>EventRecordInput</code> 只导出类型（它是 <code>z.input&lt;&gt;</code>，仅供 TS 编译期使用）。</p>
+
+<pre><code>// 行 29-37：内部导出（_ 前缀）
+export {
+  EventSource as _EventSource,
+  VisibilityDeclaration as _VisibilityDeclaration,
+  INFRA_RELATIONS as _INFRA_RELATIONS,
+} from "./types.js";
+export type {
+  WorldGraphOptions as _WorldGraphOptions,
+  TemporalQueryOpts as _TemporalQueryOpts,
+} from "./world-graph.js";</code></pre>
+
+<p><code>_</code> 前缀 = 软隔离，告诉消费方"可用但不保证稳定"。测试和调试场景会用，生产代码不应依赖。</p>
+
+<span class="anchor" id="sec-5-5"></span>
+<h3>5.5 <code>src/types.ts</code> — Zod schema 与类型常量</h3>
+
+<p><strong>职责</strong>：定义所有领域类型的 zod schema，运行时校验 + 编译期类型推导的双重保证。</p>
+
+<h4>实体类型枚举（行 10-11）</h4>
+
+<pre><code>export const EntityType = z.enum(["character", "location", "item", "concept"]);
+export type EntityType = z.infer&lt;typeof EntityType&gt;;</code></pre>
+
+<p>4 类几何定义：</p>
+<ul>
+  <li><code>character</code> 有意志的实体（角色）</li>
+  <li><code>location</code> 被动空间实体（场景）</li>
+  <li><code>item</code> 物品实体</li>
+  <li><code>concept</code> 弥漫性概念实体（世界观、规则、组织）</li>
+</ul>
+
+<p><code>z.enum</code> 既是值（运行时校验）也是类型（<code>z.infer</code> 推导出联合类型）。</p>
+
+<h4>模态系统（行 19-20）</h4>
+
+<pre><code>export const Modality = z.enum(["fact", "belief", "hypothesis"]);</code></pre>
+
+<p>声明的认识论地位：</p>
+<ul>
+  <li><code>fact</code> 客观事实</li>
+  <li><code>belief</code> 角色信念（主观）</li>
+  <li><code>hypothesis</code> 假设/推测</li>
+</ul>
+
+<p>用于 characterView 的 <code>modalityFilter</code>，例如只看客观事实时传 <code>["fact"]</code>。</p>
+
+<h4>事件类型（行 28-29）</h4>
+
+<pre><code>export const EventType = z.enum(["birth", "death", "change"]);</code></pre>
+
+<p>3 类原子操作。<code>processEvent</code> 按此分派。</p>
+
+<h4>状态声明（行 36-46）</h4>
+
+<pre><code>export const StateDeclaration = z.object({
+  declarationId: z.string(),
+  entityId: z.string(),
+  property: z.string(),
+  value: z.unknown(),
+  valueText: z.string().optional(),
+  modality: Modality,
+  validFrom: z.string(),
+  validTo: z.string(),
+});</code></pre>
+
+<p>TypeGraph 中状态的最小单元。关键字段：</p>
+<ul>
+  <li><code>declarationId</code> 全局唯一，格式约定 <code>decl-{entityId}-{property}-{storyTime}</code>。</li>
+  <li><code>value: z.unknown()</code> — 不约束值类型（任何 JSON 可序列化值都行）。</li>
+  <li><code>valueText</code> 可选，是 value 的字符串化版本，参与全文检索（zh 分词）。</li>
+  <li><code>validFrom</code> / <code>validTo</code> 时态区间，<code>validTo = "Infinity"</code> 表示未闭合。</li>
+</ul>
+
+<h4>事件来源与事件记录（行 55-93）</h4>
+
+<pre><code>export const EventSource = z.enum(["engine", "user"]);</code></pre>
+
+<ul>
+  <li><code>engine</code> 引擎扩散产生（如 commit 写扩散）</li>
+  <li><code>user</code> 用户/前端编辑产生</li>
+</ul>
+
+<pre><code>export const EventRecord = z.object({
+  eventId: z.string(),
+  type: EventType,
+  storyTime: z.string(),
+  entityId: z.string(),
+  source: EventSource.default("engine"),
+  entityType: EntityType.optional(),
+  summary: z.string().optional(),
+  invalidated: z.array(...).optional(),
+  newFacts: z.array(...).optional(),
+  causedBy: z.string().optional(),
+  userInput: z.string().optional(),
+  recordedAt: z.string().optional(),
+});</code></pre>
+
+<p>逐字段：</p>
+<ul>
+  <li><code>eventId</code> 全局唯一，由调用方生成（建议 UUID 或时间戳+随机）。</li>
+  <li><code>storyTime</code> 故事时间标识（如 <code>"act1-scene4"</code>），字符串字典序可比较。</li>
+  <li><code>source</code> 缺省 <code>"engine"</code>。</li>
+  <li><code>entityType</code> 仅 birth 事件用，缺省时 <code>processEvent</code> 默认 <code>"character"</code>。</li>
+  <li><code>summary</code> 仅 birth 事件用，实体的无状态客观事实描述。</li>
+  <li><code>invalidated</code> 仅 change 事件用，列出要闭合的旧声明。</li>
+  <li><code>newFacts</code> birth / change 事件用，新声明数组。</li>
+  <li><code>causedBy</code> 指向前驱事件的 <code>eventId</code>，组成因果链。</li>
+  <li><code>userInput</code> 用户口述原文（2026-07-25 新增），跨会话项目记忆引用。</li>
+  <li><code>recordedAt</code> 写入墙钟时间（2026-07-25 新增），双时态事务时间轴。</li>
+</ul>
+
+<pre><code>export type EventRecordInput = z.input&lt;typeof EventRecord&gt;;</code></pre>
+
+<p><code>z.input</code> 推导出"输入侧"类型：<code>source</code> 可省略（因为 <code>.default()</code>），其他 optional 字段仍 optional。这是 <code>processEvent</code> 接受的入参类型。</p>
+
+<h4>可见性来源（行 104-105）</h4>
+
+<pre><code>export const VisibilitySource = z.enum(["experienced", "informed", "witnessed"]);</code></pre>
+
+<ul>
+  <li><code>experienced</code> 自产自知（角色自己产出的 state_change，confidence=1）</li>
+  <li><code>informed</code> 他人告知（角色通过对话/观察学到的他人状态）</li>
+  <li><code>witnessed</code> 基础设施推断（<code>inferVisibility</code> 自动为 <code>located_in</code> 关系推导）</li>
+</ul>
+
+<p>2026-07-29 从 <code>z.string()</code> 收窄为枚举，清理历史遗留值 <code>self/rumor/told/explicit/inferred</code>。旧数据保持原样不迁移。</p>
+
+<h4>可见性声明（行 110-120）</h4>
+
+<pre><code>export const VisibilityDeclaration = z.object({
+  characterId: z.string(),
+  declarationId: z.string(),
+  state: z.enum(["known"]),
+  confidence: z.number().min(0).max(1),
+  source: VisibilitySource,
+  validFrom: z.string(),
+  validTo: z.string().default("Infinity"),
+  isExplicit: z.boolean(),
+});</code></pre>
+
+<p>注意 <code>state</code> 当前只有 <code>"known"</code> 一个值（设计冗余，未来扩展 <code>forgotten</code> / <code>suspected</code>）。</p>
+
+<h4>基础设施关系常量（行 127）</h4>
+
+<pre><code>export const INFRA_RELATIONS: readonly string[] = ["located_in"] as const;</code></pre>
+
+<p><code>inferVisibility</code> 会遍历所有 <code>label === "located_in"</code> 的关系做同地点可见性推断。</p>
+
+<h4>INFINITY 哨兵（行 136）</h4>
+
+<pre><code>export const INFINITY = "Infinity";</code></pre>
+
+<p>未闭合标记。<strong>关键陷阱</strong>：字符串字典序 <code>"I" &lt; "a"</code>，所以所有时态比较 <code>validFrom &lt;= t &lt; validTo</code> 必须先特判 <code>validTo === INFINITY</code>，否则会误判未闭合记录。全包所有时态过滤都遵守此约定。</p>
+
+<span class="anchor" id="sec-5-6"></span>
+<h3>5.6 <code>src/event-log.ts</code> — JSONL 事件日志</h3>
+
+<p><strong>职责</strong>：append-only JSONL 事件日志，每行一个 EventRecord JSON，支持因果链回溯。</p>
+
+<pre><code>import { appendFileSync, readFileSync, existsSync } from "node:fs";
+import { EventRecord } from "./types.js";
+import type { EventRecordInput } from "./types.js";</code></pre>
+
+<p>同步 fs API（<code>appendFileSync</code> / <code>readFileSync</code>）。设计选择：写日志是写扩散的第一步，同步写入确保日志落盘后才继续状态图写入，崩溃时日志优先保留。</p>
+
+<pre><code>export class EventLog {
+  constructor(private readonly path: string) {}</code></pre>
+
+<p>构造函数只存路径，不打开文件句柄。每次 append/read 都直接操作路径，所以 <code>close()</code> 是 no-op。</p>
+
+<pre><code>  async append(input: EventRecordInput): Promise&lt;void&gt; {
+    const line = JSON.stringify(EventRecord.parse(input)) + "\n";
+    appendFileSync(this.path, line, "utf-8");
+  }</code></pre>
+
+<p><code>EventRecord.parse</code> 应用默认值（<code>source</code> 缺省 <code>"engine"</code>），日志行始终是完整 EventRecord。<code>+ "\n"</code> 保证每行一个 JSON。</p>
+
+<div class="warn"><strong>已知问题</strong>：单行 JSON 损坏会让整个 <code>readAll</code> 抛错。B 类修复将加 try/catch 跳过损坏行。</div>
+
+<pre><code>  async readAll(): Promise&lt;EventRecord[]&gt; {
+    if (!existsSync(this.path)) return [];
+    const content = readFileSync(this.path, "utf-8");
+    return content
+      .split("\n")
+      .filter((line) =&gt; line.trim().length &gt; 0)
+      .map((line) =&gt; JSON.parse(line) as EventRecord);
+  }</code></pre>
+
+<p>文件不存在返回空数组。读全文 split 行，过滤空行，逐行 <code>JSON.parse</code>。</p>
+
+<div class="warn"><strong>已知问题</strong>：全文读取 + 全建 Map，日志上规模后内存与时间开销显著。B 类修复将改流式读取。</div>
+
+<pre><code>  async traceBack(eventId: string): Promise&lt;EventRecord[]&gt; {
+    const all = await this.readAll();
+    const byId = new Map(all.map((e) =&gt; [e.eventId, e]));
+    const chain: EventRecord[] = [];
+    let cur = byId.get(eventId);
+    while (cur) {
+      chain.unshift(cur);
+      const causedBy = cur.causedBy;
+      cur = causedBy ? byId.get(causedBy) : undefined;
+    }
+    return chain;
+  }</code></pre>
+
+<p>沿 <code>causedBy</code> 字段回溯因果链。<code>chain.unshift</code> 保证返回顺序是从最早的祖先到当前事件。</p>
+
+<div class="warn"><strong>已知问题</strong>：<code>causedBy</code> 指向不存在的事件时静默停止（不区分"无前驱"和"前驱不存在"）。</div>
+
+<pre><code>  close(): void {
+    // 当前实现无状态，无需释放
+  }</code></pre>
+
+<p>no-op <code>close()</code>。0.1.1 新增，与 <code>WorldGraph.close()</code> 资源语义对称。未来若改用文件流，此处释放对应资源。</p>
+
+<span class="anchor" id="sec-5-7"></span>
+<h3>5.7 <code>src/character-view.ts</code> — 角色视角与可见性推断</h3>
+
+<p><strong>职责</strong>：实现飞书文档"步骤 5"的 characterView 五步过滤，和"步骤 6"的 <code>inferVisibility</code> 基础设施关系推断。</p>
+
+<pre><code>import type { WorldGraph } from "./world-graph.js";
+import type { VisibilityDeclaration, StateDeclaration, Modality } from "./types.js";</code></pre>
+
+<p>只 import type（编译期），运行时无副作用，避免循环依赖。</p>
+
+<h4><code>characterView</code> 函数（行 17-42）</h4>
+
+<p>五步过滤（2026-07-22 语义修订：知识持续）：</p>
+<ol>
+  <li>查全部 StateDeclaration（含已闭合——知识不因声明闭合/实体死亡而消失）。</li>
+  <li>查 characterId 在 storyTime 时刻持有的 VisibilityDeclaration。</li>
+  <li>有效起点 = <code>max(visibility.validFrom, declaration.validFrom)</code>（不能先于声明存在而知晓）。</li>
+  <li>有效终点 = <code>visibility.validTo</code>（不再与 <code>declaration.validTo</code> 取交：知识一旦获得就持续持有，直到可见性被显式撤销）。</li>
+  <li>过滤 <code>state === "known" &amp;&amp; start &lt;= storyTime &amp;&amp; modalityFilter 命中</code>。</li>
+</ol>
+
+<pre><code>export async function characterView(
+  wg: WorldGraph,
+  characterId: string,
+  storyTime: string,
+  opts: { modalityFilter?: Modality[]; recordedAsOf?: string } = {},
+): Promise&lt;StateDeclaration[]&gt; {
+  const allDecls = await wg.getAllDeclarations({ recordedAsOf: opts.recordedAsOf });
+  const visDecls = await wg.getVisibilityForCharacter(characterId, storyTime, {
+    recordedAsOf: opts.recordedAsOf,
+  });
+  const modalityFilter = opts.modalityFilter;
+
+  const visible: StateDeclaration[] = [];
+  for (const decl of allDecls) {
+    const vis = visDecls.find((v) =&gt; v.declarationId === decl.declarationId);
+    if (!vis) continue;
+    if (vis.state !== "known") continue;
+    const start = vis.validFrom &gt; decl.validFrom ? vis.validFrom : decl.validFrom;
+    if (!(start &lt;= storyTime)) continue;
+    if (modalityFilter &amp;&amp; !modalityFilter.includes(decl.modality)) continue;
+    visible.push(decl);
+  }
+  return visible;
+}</code></pre>
+
+<p><code>recordedAsOf</code> 透传到两层查询，实现 retcon 隔离：声明与可见性记录都重建到该写入时点，之后补写/改写的内容不可见。</p>
+
+<h4><code>inferVisibility</code> 函数（行 50-67）</h4>
+
+<pre><code>export async function inferVisibility(wg: WorldGraph, storyTime: string): Promise&lt;void&gt; {
+  const allRels = await wg.getAllRelationsAt(storyTime);
+  const locatedIn = allRels.filter((r) =&gt; r.label === "located_in");
+  for (const rel of locatedIn) {
+    const targetDecls = await wg.getEntityAt(rel.targetId, storyTime);
+    if (!targetDecls) continue;
+    for (const decl of targetDecls.properties) {
+      const validFrom = rel.validFrom &gt; decl.validFrom ? rel.validFrom : decl.validFrom;
+      if (validFrom &gt; storyTime) continue;
+      await wg.setVisibility(rel.sourceId, decl.declarationId, {
+        state: "known",
+        confidence: 1,
+        source: "witnessed",
+        isExplicit: false,
+        validFrom,
+      });
+    }
+  }
+}</code></pre>
+
+<p>遍历 storyTime 时刻所有 <code>located_in</code> 关系，对每条关系把 target 实体的所有有效声明标记为 source 角色可见。<code>validFrom</code> 取角色进入时间和声明时间中较晚者。</p>
+
+<div class="warn"><strong>已知问题</strong>：无幂等。重复调用同 storyTime 会产生重复 visibility 记录。B 类修复将加查重。</div>
+
+<span class="anchor" id="sec-5-8"></span>
+<h3>5.8 <code>src/world-graph.ts</code> — 核心图引擎</h3>
+
+<p><strong>职责</strong>：本包最大文件（931 行），定义 TypeGraph schema、<code>WorldGraph</code> 类、所有公共 API 实现。逐段拆解。</p>
+
+<h4>Imports（行 1-22）</h4>
+
+<pre><code>import Database from "better-sqlite3";
+import { drizzle } from "drizzle-orm/better-sqlite3";
+import { load as loadSqliteVec } from "sqlite-vec";
+import {
+  createStoreWithSchema,
+  defineNode,
+  defineEdge,
+  defineGraph,
+  searchable,
+  embedding,
+  sqliteVecStrategy,
+} from "@nicia-ai/typegraph";
+import type { HistoryStore, EmbeddingValue, RecordedInstant } from "@nicia-ai/typegraph";
+import {
+  createSqliteBackend,
+  generateSqliteMigrationSQL,
+} from "@nicia-ai/typegraph/adapters/drizzle/sqlite";
+import { getActiveSchema, migrateSchema } from "@nicia-ai/typegraph/schema";
+import { z } from "zod";
+import { EntityType, Modality, EventRecord, VisibilitySource, INFINITY } from "./types.js";
+import type { StateDeclaration, VisibilityDeclaration, EventRecordInput } from "./types.js";
+import { EventLog } from "./event-log.js";</code></pre>
+
+<ul>
+  <li><code>better-sqlite3</code> 同步 SQLite 绑定。</li>
+  <li><code>drizzle-orm/better-sqlite3</code> SQLite ORM 适配。</li>
+  <li><code>sqlite-vec</code> 向量扩展，<code>load</code> 进 db 连接。</li>
+  <li><code>@nicia-ai/typegraph</code> 核心 SDK：<code>createStoreWithSchema</code> / <code>defineNode</code> / <code>defineEdge</code> / <code>defineGraph</code> / <code>searchable</code> / <code>embedding</code> / <code>sqliteVecStrategy</code>。</li>
+  <li><code>type { HistoryStore, EmbeddingValue, RecordedInstant }</code> — 仅类型导入。</li>
+  <li><code>createSqliteBackend</code> / <code>generateSqliteMigrationSQL</code> — drizzle SQLite 适配。</li>
+  <li><code>getActiveSchema</code> / <code>migrateSchema</code> — schema 版本管理。</li>
+  <li><code>zod</code> schema 校验。</li>
+  <li>本包内部：types.js 的值与类型，event-log.js 的 EventLog 类。</li>
+</ul>
+
+<h4><code>asEmbedding</code> helper（行 25-33）</h4>
+
+<pre><code>function asEmbedding(vec: number[]): EmbeddingValue {
+  return vec as unknown as EmbeddingValue;
+}</code></pre>
+
+<p>把 <code>number[]</code> 断言为 SDK 的 <code>EmbeddingValue</code> branded type。SDK 的 <code>EmbeddingValue = readonly number[] &amp; { [EMBEDDING_BRAND]: true }</code>，是编译期 brand，运行时仍是 <code>number[]</code>。集中到此 helper，避免散落的 <code>as unknown as</code>。0.1.1 新增。</p>
+
+<h4><code>GraphRecord</code> 接口（行 43-72）</h4>
+
+<pre><code>interface GraphRecord {
+  id: string;
+  entityId?: string;
+  type?: EntityType;
+  // ... 各节点类型字段并集 ...
+  validFrom: string;
+  validTo: string;
+  embedding?: EmbeddingValue;
+  meta?: { createdAt?: string; updatedAt?: string };
+}</code></pre>
+
+<p>内部节点记录类型 — SDK 节点 find/scan 返回值的并集。SDK 的节点类型是 branded NodeId + mapped type，动态访问 <code>(this.store.nodes as any)[kind]</code> 无法保留精确类型，故定义此宽松接口。各字段 optional（不同节点类型字段不同），调用方按需读取。0.1.1 新增，替代了 30+ 处 <code>(x: any)</code>。</p>
+
+<h4>TypeGraph 节点定义（行 79-127）</h4>
+
+<pre><code>const EntityNode = defineNode("Entity", {
+  schema: z.object({
+    entityId: z.string(),
+    type: EntityType,
+    summary: z.string().default(""),
+    validFrom: z.string(),
+    validTo: z.string(),
+    embedding: embedding(512).optional(),
+  }),
+});</code></pre>
+
+<p>4 个节点类型：</p>
+<ul>
+  <li><code>EntityNode</code> — 实体。<code>embedding(512)</code> 512 维向量字段（用于相似度检索）。<code>summary</code> 默认空串，是实体无状态客观事实描述。</li>
+  <li><code>FactNode</code> — 状态声明。<code>property</code> 和 <code>valueText</code> 用 <code>searchable({ language: "zh" })</code> 包装，启用中文全文检索。</li>
+  <li><code>RelationNode</code> — 关系三元组（source / target / label）。</li>
+  <li><code>VisibilityNode</code> — 可见性声明。</li>
+</ul>
+
+<p><code>validFrom</code> / <code>validTo</code> 作为 schema 字段，由应用层管理 bi-temporal 语义。<code>"Infinity"</code> 表示未闭合。</p>
+
+<h4><code>declaresEdge</code> 预留定义（行 138）</h4>
+
+<pre><code>const declaresEdge = defineEdge("declares");</code></pre>
+
+<p>行 129-137 的注释说明：<code>declares</code> 边（Entity → Fact）预留定义，<strong>当前未使用</strong>。<code>birthEntity</code> / <code>processEvent</code> 写 Fact 时不创建 declares 边，查询也不走边遍历。保留是为了未来知识图谱遍历需求。</p>
+
+<div class="warn"><strong>关键</strong>：删除此边定义会改变 graph schema_hash，触发旧库 <code>MIGRATION_ERROR</code>，故即使未用也不要删除。</div>
+
+<h4>Graph 定义（行 140-151）</h4>
+
+<pre><code>const graph = defineGraph({
+  id: "world",
+  nodes: {
+    Entity: { type: EntityNode },
+    Fact: { type: FactNode },
+    Relation: { type: RelationNode },
+    Visibility: { type: VisibilityNode },
+  },
+  edges: {
+    declares: { type: declaresEdge, from: [EntityNode], to: [FactNode] },
+  },
+});</code></pre>
+
+<p>graph id 是 <code>"world"</code>，schema 版本管理按此 id 索引。</p>
+
+<h4>公共接口类型（行 153-187）</h4>
+
+<pre><code>export interface WorldGraphOptions {
+  dbPath: string;
+  eventLogPath: string;
+}
+
+export interface MigrateResult {
+  fromVersion: number;
+  toVersion: number;
+}
+
+export interface EntitySnapshot {
+  entityId: string;
+  type: EntityType;
+  summary: string;
+  validFrom: string;
+  validTo: string;
+  properties: StateDeclaration[];
+}
+
+export interface TemporalQueryOpts {
+  recordedAsOf?: string;
+}</code></pre>
+
+<p><code>WorldGraphOptions</code> 是 <code>create</code> / <code>migrate</code> 的入参，纯路径，无其他配置。<code>TemporalQueryOpts.recordedAsOf</code> 是双时态查询的事务时间坐标，由 <code>recordedNow()</code> 获取，形如 <code>"r1:0000000000000007:2026-07-25T16:02:32.048Z"</code>，字典序可比较。</p>
+
+<h4><code>WorldGraph</code> 类字段与构造（行 189-229）</h4>
+
+<pre><code>export class WorldGraph {
+  private db: Database.Database;
+  private store: HistoryStore&lt;typeof graph&gt;;
+  private eventLog: EventLog;
+  private _writeLock: Promise&lt;void&gt; = Promise.resolve();
+
+  private constructor(db, store, eventLog) { ... }
+
+  private async withWriteLock&lt;T&gt;(fn: () =&gt; Promise&lt;T&gt;): Promise&lt;T&gt; {
+    const prev = this._writeLock;
+    let release!: () =&gt; void;
+    this._writeLock = new Promise&lt;void&gt;((resolve) =&gt; { release = resolve; });
+    await prev;
+    try { return await fn(); } finally { release(); }
+  }
+}</code></pre>
+
+<p>构造函数是 <code>private</code>，强制走 <code>create</code> 异步工厂。<code>_writeLock</code> + <code>withWriteLock</code> 是 0.1.1 新增的 async mutex，保证 <code>processEvent</code> 串行执行（多步异步写并发会交错）。</p>
+
+<p>注释明确：<strong>范围只锁 processEvent</strong>。<code>birthEntity</code> / <code>killEntity</code> / <code>setVisibility</code> 等单一写入方法未加锁；若外部混用 <code>processEvent</code> 与这些方法，仍可能交错。完整隔离需消费方自行避免并发混用，或后续扩展锁覆盖所有写入方法。</p>
+
+<h4><code>create</code> 异步工厂（行 241-257）</h4>
+
+<pre><code>static async create(opts: WorldGraphOptions): Promise&lt;WorldGraph&gt; {
+  const db = new Database(opts.dbPath);
+  try {
+    db.pragma("journal_mode = WAL");
+    loadSqliteVec(db);
+    const drizzleDb = drizzle(db);
+    db.exec(generateSqliteMigrationSQL());
+    const backend = createSqliteBackend(drizzleDb, { vector: sqliteVecStrategy });
+    const [store, _schemaResult] = await createStoreWithSchema(graph, backend, { history: true });
+    const eventLog = new EventLog(opts.eventLogPath);
+    return new WorldGraph(db, store, eventLog);
+  } catch (err) {
+    db.close();
+    throw err;
+  }
+}</code></pre>
+
+<p>逐行：</p>
+<ol>
+  <li><code>new Database(opts.dbPath)</code> — 打开/创建 SQLite 文件。</li>
+  <li><code>db.pragma("journal_mode = WAL")</code> — 启用 WAL 模式，提升并发读性能。</li>
+  <li><code>loadSqliteVec(db)</code> — 加载 sqlite-vec 扩展，使向量 DDL/写入/检索可用。</li>
+  <li><code>drizzle(db)</code> — 包装为 drizzle ORM 实例。</li>
+  <li><code>db.exec(generateSqliteMigrationSQL())</code> — 生成并执行 SQLite 迁移 DDL（建表、索引等）。</li>
+  <li><code>createSqliteBackend(drizzleDb, { vector: sqliteVecStrategy })</code> — 创建后端，指定向量策略为 sqlite-vec。</li>
+  <li><code>createStoreWithSchema(graph, backend, { history: true })</code> — 用 graph 定义初始化 store，<code>history: true</code> 启用双时态历史记录。</li>
+  <li><code>new EventLog(opts.eventLogPath)</code> — 创建事件日志（不打开文件）。</li>
+  <li><code>new WorldGraph(...)</code> — 返回实例。</li>
+</ol>
+
+<p><code>catch</code> 块：schema 校验失败（如 <code>MIGRATION_ERROR</code>）时释放句柄，避免占用 db 文件。</p>
+
+<h4><code>migrate</code> 静态方法（行 270-287）</h4>
+
+<pre><code>static async migrate(opts: WorldGraphOptions): Promise&lt;MigrateResult&gt; {
+  const db = new Database(opts.dbPath);
+  try {
+    db.pragma("journal_mode = WAL");
+    loadSqliteVec(db);
+    const drizzleDb = drizzle(db);
+    db.exec(generateSqliteMigrationSQL());
+    const backend = createSqliteBackend(drizzleDb, { vector: sqliteVecStrategy });
+    const active = await getActiveSchema(backend, graph.id);
+    if (!active) {
+      throw new Error("schema 未初始化，无需迁移（空库请直接 create）");
+    }
+    const toVersion = await migrateSchema(backend, graph, active.version);
+    return { fromVersion: active.version, toVersion };
+  } finally {
+    db.close();
+  }
+}</code></pre>
+
+<p>用途：旧版引擎创建的 <code>world.db</code> 在新版代码下 <code>create</code> 会抛 <code>MIGRATION_ERROR</code>（schema 定义有变更）。本方法用当前 graph 定义提交新 schema 版本，完成后 <code>create</code> 即可正常打开。</p>
+
+<div class="warn"><strong>安全约束</strong>：调用方负责在调用前备份 db 文件。</div>
+
+<h4><code>close</code> / <code>search</code> / <code>query</code> / <code>recordedNow</code>（行 289-317）</h4>
+
+<pre><code>close(): void {
+  this.eventLog.close();
+  this.db.close();
+}
+
+get search() {
+  return this.store.search;
+}
+
+query() {
+  return this.store.query();
+}
+
+async recordedNow(): Promise&lt;string | undefined&gt; {
+  const instant = await this.store.recordedNow();
+  return instant as string | undefined;
+}</code></pre>
+
+<ul>
+  <li><code>close</code> — 0.1.1 加了 <code>eventLog.close()</code>（no-op）保证资源语义对称。</li>
+  <li><code>search</code> getter — 透传 SDK <code>StoreSearch</code>，调用方可用 <code>fulltext</code> / <code>vector</code> / <code>hybrid</code>。</li>
+  <li><code>query()</code> — 透传 SDK <code>QueryBuilder</code>，供复杂图遍历查询。</li>
+  <li><code>recordedNow()</code> — 当前事务时间坐标。空图（尚无写入）返回 <code>undefined</code>。</li>
+</ul>
+
+<h4><code>findNodes</code> 私有方法（行 324-343）</h4>
+
+<pre><code>private async findNodes(
+  kind: "Entity" | "Fact" | "Relation" | "Visibility",
+  recordedAsOf?: string,
+): Promise&lt;GraphRecord[]&gt; {
+  if (!recordedAsOf) {
+    return await (this.store.nodes as any)[kind].find() as GraphRecord[];
+  }
+  const view = this.store.asOfRecorded(recordedAsOf as RecordedInstant);
+  const collection = (view.nodes as any)[kind];
+  const out: GraphRecord[] = [];
+  let after: string | undefined;
+  do {
+    const page = await collection.scan({ limit: 1000, after });
+    out.push(...(page.data as GraphRecord[]));
+    after = page.nextCursor;
+  } while (after);
+  return out;
+}</code></pre>
+
+<p>双时态节点读取：带 <code>recordedAsOf</code> 时走 SDK <code>RecordedStoreView</code> 重建该事务时点的节点状态（含后续被闭合/修改的字段原值）；否则走 live <code>find()</code>。<code>scan</code> 单页上限 1000，循环翻页取全量。</p>
+
+<p><code>as any</code> 是 SDK mapped type 动态访问的已知限制，0.1.1 加了注释说明。</p>
+
+<h4>实体生命周期方法（行 345-471）</h4>
+
+<pre><code>async birthEntity(entityId, entityType, initialProps, storyTime, summary?): Promise&lt;void&gt;
+async killEntity(entityId, storyTime): Promise&lt;void&gt;
+async getEntityAt(entityId, storyTime, opts?): Promise&lt;EntitySnapshot | null&gt;
+async updateEntitySummary(entityId, summary): Promise&lt;void&gt;</code></pre>
+
+<ul>
+  <li><code>birthEntity</code> — 创建 Entity 节点 + 循环创建 Fact 节点（initialProps 的每个键值对一个 Fact）。<code>declarationId</code> 格式 <code>decl-{entityId}-{prop}-{storyTime}</code>。</li>
+  <li><code>killEntity</code> — 闭合 Entity 的 <code>validTo</code>，级联闭合该实体所有未闭合 Fact。找不到实体或已死时抛错。</li>
+  <li><code>getEntityAt</code> — bi-temporal 快照查询。<code>validFrom &lt;= storyTime &lt; validTo</code>（特判 INFINITY），叠加 <code>recordedAsOf</code>（事务时间轴）。</li>
+  <li><code>updateEntitySummary</code> — 直接覆盖当前 Entity 的 summary，不参与时态。</li>
+</ul>
+
+<h4>关系方法（行 436-504）</h4>
+
+<pre><code>async addRelation(sourceId, targetId, label, storyTime): Promise&lt;void&gt;
+async closeRelation(sourceId, targetId, label, storyTime): Promise&lt;void&gt;
+async getRelations(entityId, storyTime, opts?): Promise&lt;Array&lt;{...}&gt;&gt;</code></pre>
+
+<p><code>relationId</code> 格式 <code>rel-{sourceId}-{label}-{targetId}-{storyTime}</code>。<code>closeRelation</code> 找不到匹配未闭合关系时抛错。</p>
+
+<h4><code>processEvent</code> 事件入口（行 506-566）</h4>
+
+<pre><code>async processEvent(input: EventRecordInput): Promise&lt;void&gt; {
+  return this.withWriteLock(() =&gt; this._processEvent(input));
+}
+
+private async _processEvent(input: EventRecordInput): Promise&lt;void&gt; {
+  const event = EventRecord.parse({
+    recordedAt: new Date().toISOString(),
+    ...input,
+  });
+  await this.eventLog.append(event);
+
+  switch (event.type) {
+    case "birth":
+      await this.birthEntity(...);
+      break;
+    case "death":
+      await this.killEntity(event.entityId, event.storyTime);
+      break;
+    case "change":
+      // 闭合旧声明 + 写入新声明
+      ...
+      break;
+  }
+}</code></pre>
+
+<p>0.1.1 拆为 <code>processEvent</code>（加锁）+ <code>_processEvent</code>（实际逻辑）。<code>recordedAt</code> 缺省填充当前时间，调用方显式传入时优先。先写日志（保证因果链可回溯），再按 type 分派。</p>
+
+<div class="warn"><strong>birth 分支的已知问题</strong>：<code>Object.fromEntries((event.newFacts ?? []).map((f) =&gt; [f.property, f.value]))</code> 同 property 多条 newFacts 互相覆盖只留最后一条；newFacts.entityId 被完全忽略，跨实体 newFacts 静默丢失。这是 D 类需对齐的修复。</div>
+
+<h4>事件查询方法（行 568-576）</h4>
+
+<pre><code>async traceCauses(eventId): Promise&lt;EventRecord[]&gt;
+async getAllEvents(): Promise&lt;EventRecord[]&gt;</code></pre>
+
+<p><code>traceCauses</code> 委托给 <code>eventLog.traceBack</code>。<code>getAllEvents</code> 按 <code>storyTime</code> 升序。</p>
+
+<h4>可见性方法（行 578-662）</h4>
+
+<pre><code>async setVisibility(characterId, declarationId, opts): Promise&lt;void&gt;
+async getVisibilityForCharacter(characterId, storyTime, opts?): Promise&lt;VisibilityDeclaration[]&gt;
+async closeVisibility(characterId, declarationId, storyTime): Promise&lt;void&gt;
+async getVisibilityForDeclaration(declarationId, storyTime?): Promise&lt;VisibilityDeclaration[]&gt;</code></pre>
+
+<p><code>setVisibility</code> 的 <code>visibilityId</code> 格式 <code>vis-{characterId}-{declarationId}-{validFrom}</code>。<code>closeVisibility</code> 找不到匹配未闭合记录时抛错。</p>
+
+<h4>声明查询方法（行 664-696）</h4>
+
+<pre><code>async getAllDeclarationsAt(storyTime, opts?): Promise&lt;StateDeclaration[]&gt;
+async getAllDeclarations(opts?): Promise&lt;StateDeclaration[]&gt;</code></pre>
+
+<p><code>getAllDeclarations</code> 不做时态过滤，含已闭合，供 character_view 的"知识持续"语义使用。</p>
+
+<h4>关系查询方法（行 698-714）</h4>
+
+<pre><code>async getAllRelationsAt(storyTime, opts?): Promise&lt;Array&lt;{...}&gt;&gt;</code></pre>
+
+<h4>视角代理方法（行 716-728）</h4>
+
+<pre><code>async inferVisibility(storyTime): Promise&lt;void&gt;
+async getCharacterView(characterId, storyTime, opts?): Promise&lt;StateDeclaration[]&gt;</code></pre>
+
+<p>动态 <code>import("./character-view.js")</code> 调用 character-view.ts 的函数。延迟 import 避免循环依赖。</p>
+
+<h4>实体查询方法（行 730-818）</h4>
+
+<pre><code>async getAllEntities(storyTime, opts?): Promise&lt;EntitySnapshot[]&gt;
+async getEntityHistory(entityId): Promise&lt;{ entities, facts }&gt;
+async getRelationHistory(entityId?): Promise&lt;Array&lt;{...}&gt;&gt;</code></pre>
+
+<p><code>getEntityHistory</code> 返回单个实体的全部版本（含已闭合记录）+ 全部 Fact（含历史），按 <code>validFrom</code> 升序。Fact 附带 <code>meta.createdAt</code> / <code>meta.updatedAt</code>（SDK 元信息，旧数据可能缺失）。</p>
+
+<h4><code>listStoryTimes</code>（行 825-840）</h4>
+
+<pre><code>async listStoryTimes(): Promise&lt;string[]&gt;</code></pre>
+
+<p>从 events + Entity/Fact/Relation/Visibility 的 validFrom/validTo 聚合所有出现过的 storyTime，去重升序，排除 <code>"Infinity"</code>。供前端 storyTime 快照选择器使用。</p>
+
+<h4>Embedding 方法（行 854-930）</h4>
+
+<pre><code>async reembedAll(embedder: { embedEntity, embedFact }): Promise&lt;void&gt;
+async updateFactEmbedding(declarationId, embedding): Promise&lt;void&gt;
+async updateEntityEmbedding(entityId, embedding): Promise&lt;void&gt;</code></pre>
+
+<ul>
+  <li><code>reembedAll</code> — 重新嵌入所有 Entity 与 Fact 的向量。Entity 用其 validFrom（诞生时刻）取快照，Fact 直接构造 StateDeclaration 传入。</li>
+  <li><code>updateFactEmbedding</code> — commit.ts 写扩散后增量更新单条向量，避免全量 reembedAll 性能开销。找不到 declarationId 时静默跳过。</li>
+  <li><code>updateEntityEmbedding</code> — Entity.summary 变化时调用。预留 API。</li>
+</ul>
+
+<p><code>asEmbedding(vec)</code> 集中处理 branded type 双重断言。</p>
+
+<span class="anchor" id="sec-5-9"></span>
+<h3>5.9 <code>scripts/smoke.mjs</code> — 端到端冒烟</h3>
+
+<p><strong>职责</strong>：Macbeth 故事片段端到端冒烟，7 个步骤覆盖核心 API。</p>
+
+<pre><code>import { WorldGraph } from "../src/index.ts";
+import { mkdtempSync, rmSync } from "node:fs";
+import { join } from "node:path";
+import { tmpdir } from "node:os";
+
+const dir = mkdtempSync(join(tmpdir(), "wg-smoke-"));
+const wg = await WorldGraph.create({
+  dbPath: join(dir, "world.db"),
+  eventLogPath: join(dir, "events.jsonl"),
+});</code></pre>
+
+<p><code>mkdtempSync</code> 创建临时目录，结束后 <code>rmSync</code> 递归删除。<code>import</code> 直接引用 <code>../src/index.ts</code>（tsx 支持）。</p>
+
+<p>7 个步骤：</p>
+<ol>
+  <li><code>birthEntity</code> macbeth + inverness。</li>
+  <li><code>addRelation</code> located_in。</li>
+  <li><code>processEvent</code> change（Duncan 访问 Inverness）。</li>
+  <li><code>inferVisibility</code>。</li>
+  <li><code>getCharacterView</code>（Macbeth 视角）。</li>
+  <li><code>traceCauses</code>。</li>
+  <li><code>killEntity</code> + 验证消亡后查不到。</li>
+</ol>
+
+<p>成功输出 <code>✅ 端到端冒烟全部通过</code>。</p>
+
+<span class="anchor" id="sec-5-10"></span>
+<h3>5.10 <code>.github/workflows/ci.yml</code> — CI 流水线</h3>
+
+<p><strong>职责</strong>：GitHub Actions CI，push master / tag / PR 时触发。</p>
+
+<pre><code>on:
+  push:
+    branches: [master]
+    tags: ["v*"]
+  pull_request:
+    branches: [master]</code></pre>
+
+<p>两个 job：</p>
+<ul>
+  <li><code>test</code> — Node 20 / 22 矩阵跑 typecheck + build + test。</li>
+  <li><code>publish</code> — 仅 tag <code>v*</code> 触发，<code>needs: test</code> 通过后才跑。<code>NPM_TOKEN</code> 未配置时 publish step 自动跳过（避免 401 变红）。</li>
+</ul>
+
+<p><code>publish</code> 用 <code>--provenance</code> 启用 npm 包来源证明（npm provenance），<code>id-token: write</code> 权限是 provenance 必需。</p>
+
+<span class="anchor" id="sec-6"></span>
+<h2>6. API 速查表</h2>
+
+<h3>工厂与生命周期</h3>
+
+<table>
+  <thead><tr><th>方法</th><th>签名</th><th>说明</th></tr></thead>
+  <tbody>
+    <tr><td><code>WorldGraph.create</code></td><td><code>(opts: WorldGraphOptions) =&gt; Promise&lt;WorldGraph&gt;</code></td><td>异步工厂，初始化 SQLite + sqlite-vec + TypeGraph</td></tr>
+    <tr><td><code>WorldGraph.migrate</code></td><td><code>(opts: WorldGraphOptions) =&gt; Promise&lt;MigrateResult&gt;</code></td><td>schema 版本迁移</td></tr>
+    <tr><td><code>wg.close</code></td><td><code>() =&gt; void</code></td><td>释放 db 句柄（含 EventLog.close）</td></tr>
+  </tbody>
+</table>
+
+<h3>实体</h3>
+
+<table>
+  <thead><tr><th>方法</th><th>说明</th></tr></thead>
+  <tbody>
+    <tr><td><code>birthEntity(entityId, type, initialProps, storyTime, summary?)</code></td><td>诞生实体 + 初始属性</td></tr>
+    <tr><td><code>killEntity(entityId, storyTime)</code></td><td>消亡实体，级联闭合 Fact</td></tr>
+    <tr><td><code>getEntityAt(entityId, storyTime, opts?)</code></td><td>bi-temporal 快照</td></tr>
+    <tr><td><code>getAllEntities(storyTime, opts?)</code></td><td>全部有效实体</td></tr>
+    <tr><td><code>getEntityHistory(entityId)</code></td><td>全部版本（含已闭合）</td></tr>
+    <tr><td><code>updateEntitySummary(entityId, summary)</code></td><td>直接覆盖 summary</td></tr>
+  </tbody>
+</table>
+
+<h3>关系</h3>
+
+<table>
+  <thead><tr><th>方法</th><th>说明</th></tr></thead>
+  <tbody>
+    <tr><td><code>addRelation(sourceId, targetId, label, storyTime)</code></td><td>创建关系</td></tr>
+    <tr><td><code>closeRelation(sourceId, targetId, label, storyTime)</code></td><td>闭合关系</td></tr>
+    <tr><td><code>getRelations(entityId, storyTime, opts?)</code></td><td>bi-temporal 关系查询</td></tr>
+    <tr><td><code>getRelationHistory(entityId?)</code></td><td>全部关系（含已闭合）</td></tr>
+  </tbody>
+</table>
+
+<h3>事件</h3>
+
+<table>
+  <thead><tr><th>方法</th><th>说明</th></tr></thead>
+  <tbody>
+    <tr><td><code>processEvent(input)</code></td><td>追加事件 + 应用副作用（birth/death/change）</td></tr>
+    <tr><td><code>traceCauses(eventId)</code></td><td>沿 causedBy 回溯因果链</td></tr>
+    <tr><td><code>getAllEvents()</code></td><td>全部事件（按 storyTime 升序）</td></tr>
+  </tbody>
+</table>
+
+<h3>可见性</h3>
+
+<table>
+  <thead><tr><th>方法</th><th>说明</th></tr></thead>
+  <tbody>
+    <tr><td><code>setVisibility(characterId, declarationId, opts)</code></td><td>显式声明角色知道某声明</td></tr>
+    <tr><td><code>closeVisibility(characterId, declarationId, storyTime)</code></td><td>撤销可见性</td></tr>
+    <tr><td><code>getVisibilityForCharacter(characterId, storyTime, opts?)</code></td><td>角色可见的声明</td></tr>
+    <tr><td><code>getVisibilityForDeclaration(declarationId, storyTime?)</code></td><td>声明被哪些角色可见</td></tr>
+    <tr><td><code>inferVisibility(storyTime)</code></td><td>从 located_in 自动推断</td></tr>
+    <tr><td><code>getCharacterView(characterId, storyTime, opts?)</code></td><td>角色视角（五步过滤）</td></tr>
+  </tbody>
+</table>
+
+<h3>声明</h3>
+
+<table>
+  <thead><tr><th>方法</th><th>说明</th></tr></thead>
+  <tbody>
+    <tr><td><code>getAllDeclarationsAt(storyTime, opts?)</code></td><td>storyTime 时刻有效声明</td></tr>
+    <tr><td><code>getAllDeclarations(opts?)</code></td><td>全部声明（含已闭合，知识持续）</td></tr>
+  </tbody>
+</table>
+
+<h3>检索</h3>
+
+<table>
+  <thead><tr><th>方法</th><th>说明</th></tr></thead>
+  <tbody>
+    <tr><td><code>wg.search</code></td><td>SDK StoreSearch（fulltext / vector / hybrid）</td></tr>
+    <tr><td><code>wg.query()</code></td><td>SDK QueryBuilder 入口</td></tr>
+    <tr><td><code>wg.recordedNow()</code></td><td>当前事务时间坐标</td></tr>
+    <tr><td><code>reembedAll(embedder)</code></td><td>全量重嵌入向量</td></tr>
+    <tr><td><code>updateFactEmbedding(declarationId, vec)</code></td><td>增量更新单条 Fact 向量</td></tr>
+    <tr><td><code>updateEntityEmbedding(entityId, vec)</code></td><td>增量更新单条 Entity 向量</td></tr>
+  </tbody>
+</table>
+
+<h3>工具</h3>
+
+<table>
+  <thead><tr><th>方法</th><th>说明</th></tr></thead>
+  <tbody>
+    <tr><td><code>listStoryTimes()</code></td><td>所有出现过的 storyTime</td></tr>
+    <tr><td><code>wg.close()</code></td><td>释放资源</td></tr>
+  </tbody>
+</table>
+
+<h3>公共类型</h3>
+
+<pre><code>import {
+  WorldGraph,
+  EntityType,         // "character" | "location" | "item" | "concept"
+  Modality,           // "fact" | "belief" | "hypothesis"
+  EventType,          // "birth" | "death" | "change"
+  StateDeclaration,
+  EventRecord,
+} from "underworld-graph";
+import type {
+  EntitySnapshot,
+  MigrateResult,
+  EventRecordInput,
+} from "underworld-graph";</code></pre>
+
+<h3>内部类型（_ 前缀，不保证稳定）</h3>
+
+<pre><code>import {
+  _EventSource,
+  _VisibilityDeclaration,
+  _INFRA_RELATIONS,
+} from "underworld-graph";
+import type {
+  _WorldGraphOptions,
+  _TemporalQueryOpts,
+} from "underworld-graph";</code></pre>
+
+<span class="anchor" id="sec-7"></span>
+<h2>7. 数据模型与存储布局</h2>
+
+<h3>7.1 两个文件</h3>
+
+<p>部署后运行时目录会有 4 个文件：</p>
+
+<table>
+  <thead><tr><th>文件</th><th>内容</th><th>重要度</th></tr></thead>
+  <tbody>
+    <tr><td><code>world.db</code></td><td>SQLite 主数据库，含 Entity/Fact/Relation/Visibility 节点 + TypeGraph 元表 + 向量索引</td><td>必备</td></tr>
+    <tr><td><code>world.db-wal</code></td><td>SQLite WAL 日志（写入预写日志）</td><td>自动管理</td></tr>
+    <tr><td><code>world.db-shm</code></td><td>SQLite 共享内存（WAL 模式辅助）</td><td>自动管理</td></tr>
+    <tr><td><code>events.jsonl</code></td><td>JSONL 事件日志，每行一个 EventRecord</td><td>必备</td></tr>
+  </tbody>
+</table>
+
+<h3>7.2 节点类型与字段</h3>
+
+<table>
+  <thead><tr><th>节点</th><th>字段</th><th>备注</th></tr></thead>
+  <tbody>
+    <tr><td><strong>Entity</strong></td><td>entityId, type, summary, validFrom, validTo, embedding?</td><td>embedding 512 维</td></tr>
+    <tr><td><strong>Fact</strong></td><td>declarationId, entityId, property, value, valueText?, embedding?, modality, validFrom, validTo</td><td>property/valueText 启用 zh 全文检索</td></tr>
+    <tr><td><strong>Relation</strong></td><td>relationId, sourceId, targetId, label, validFrom, validTo</td><td>三元组</td></tr>
+    <tr><td><strong>Visibility</strong></td><td>visibilityId, characterId, declarationId, state, confidence, source, validFrom, validTo, isExplicit</td><td>state 当前只有 "known"</td></tr>
+  </tbody>
+</table>
+
+<h3>7.3 ID 生成约定</h3>
+
+<table>
+  <thead><tr><th>实体</th><th>ID 格式</th></tr></thead>
+  <tbody>
+    <tr><td>Fact</td><td><code>decl-{entityId}-{property}-{storyTime}</code></td></tr>
+    <tr><td>Relation</td><td><code>rel-{sourceId}-{label}-{targetId}-{storyTime}</code></td></tr>
+    <tr><td>Visibility</td><td><code>vis-{characterId}-{declarationId}-{validFrom}</code></td></tr>
+    <tr><td>Event</td><td>调用方生成（建议 UUID 或时间戳+随机）</td></tr>
+  </tbody>
+</table>
+
+<h3>7.4 时态模型</h3>
+
+<p><strong>双时态</strong>（bi-temporal）：</p>
+<ul>
+  <li><strong>故事时间轴</strong>（story time）：<code>validFrom</code> / <code>validTo</code>，故事世界内的时间。<code>"Infinity"</code> 表示未闭合。</li>
+  <li><strong>事务时间轴</strong>（transaction time）：<code>recordedAt</code>（事件日志）和 SDK recorded instant（节点元信息），墙钟时间，记录"何时写入"。</li>
+</ul>
+
+<p><code>getEntityAt</code> 等 bi-temporal 查询：<code>validFrom &lt;= storyTime &lt; validTo</code>（特判 INFINITY）叠加 <code>opts.recordedAsOf</code>（只含该时点之前写入的内容，retcon 隔离）。</p>
+
+<h3>7.5 SQLite 模式</h3>
+
+<p><code>world.db</code> 内部表结构由 typegraph SDK 通过 <code>generateSqliteMigrationSQL()</code> 生成，包括：</p>
+<ul>
+  <li>节点表（每类节点一张）</li>
+  <li>系统索引表（fulltext / vector / materialized）</li>
+  <li>schema 版本表（<code>getActiveSchema</code> 读此表）</li>
+  <li>历史表（<code>history: true</code> 启用，记录每次写入的事务时间）</li>
+</ul>
+
+<div class="warn"><strong>不要手动改 SQLite 表结构</strong>。schema 变更只能通过修改 graph 定义 + <code>WorldGraph.migrate()</code> 走 SDK 迁移流程。</div>
+
+<span class="anchor" id="sec-8"></span>
+<h2>8. 运维与备份</h2>
+
+<h3>8.1 备份策略</h3>
+
+<pre><code># 在线备份（不影响运行中的服务）
+sqlite3 /var/lib/your-service/world/world.db ".backup '/backup/world-$(date +%F).db'"
+
+# 事件日志直接复制（append-only，复制即可）
+cp /var/lib/your-service/world/events.jsonl /backup/events-$(date +%F).jsonl
+
+# 自动化（cron 每日凌晨 3 点）
+echo '0 3 * * * root sqlite3 /var/lib/.../world.db ".backup \"/backup/world-$(date +\%F).db\"" &amp;&amp; cp /var/lib/.../events.jsonl /backup/events-$(date +\%F).jsonl' | sudo tee /etc/cron.d/world-backup</code></pre>
+
+<h3>8.2 恢复</h3>
+
+<pre><code># 停服务
+sudo systemctl stop your-service
+
+# 恢复备份
+cp /backup/world-2026-08-03.db /var/lib/your-service/world/world.db
+cp /backup/events-2026-08-03.jsonl /var/lib/your-service/world/events.jsonl
+
+# 删 WAL/SHM（让 SQLite 从主 db 重新启动）
+rm -f /var/lib/your-service/world/world.db-wal /var/lib/your-service/world/world.db-shm
+
+# 启服务
+sudo systemctl start your-service</code></pre>
+
+<h3>8.3 监控指标</h3>
+
+<table>
+  <thead><tr><th>指标</th><th>获取方式</th><th>告警阈值</th></tr></thead>
+  <tbody>
+    <tr><td>db 文件大小</td><td><code>ls -la world.db</code></td><td>&gt; 1GB 时关注</td></tr>
+    <tr><td>事件日志行数</td><td><code>wc -l events.jsonl</code></td><td>增长率突变时关注</td></tr>
+    <tr><td>进程内存</td><td><code>systemctl status your-service</code></td><td>持续上涨可能是 EventLog 全量读取累积</td></tr>
+    <tr><td>写入延迟</td><td>服务自定义指标</td><td>&gt; 1s 时关注（可能 SQLite 锁竞争）</td></tr>
+  </tbody>
+</table>
+
+<h3>8.4 升级 underworld-graph</h3>
+
+<pre><code># 1. 备份（必须！schema 变更可能不可逆）
+sqlite3 ... ".backup ..."
+
+# 2. 升级依赖
+cd /opt/your-service
+npm install underworld-graph@&lt;新版本&gt;
+
+# 3. 重启服务
+sudo systemctl restart your-service
+
+# 4. 若启动报 MIGRATION_ERROR，跑迁移
+# 在你的服务代码里加一次性迁移脚本：
+# const result = await WorldGraph.migrate({ dbPath, eventLogPath });
+# console.log(`migrated ${result.fromVersion} -&gt; ${result.toVersion}`);</code></pre>
+
+<h3>8.5 多进程注意事项</h3>
+
+<div class="warn"><strong>SQLite 是单写者</strong>。不要让多个进程同时打开同一个 <code>world.db</code> 写入。</div>
+
+<p>若必须多进程：</p>
+<ul>
+  <li>每个进程独立 <code>dbPath</code>（数据分片）。</li>
+  <li>或上层加分布式锁，确保同一时刻只有一个进程持有写权限。</li>
+  <li>WAL 模式允许并发读，但写仍串行。</li>
+</ul>
+
+<p><code>processEvent</code> 内部的 <code>_writeLock</code> 只保证单进程内的串行化，不跨进程。</p>
+
+<span class="anchor" id="sec-9"></span>
+<h2>9. 已知问题与后续路线</h2>
+
+<p>详见 <code>docs/design-review-2026-08-02.md</code>（14 项评审）+ 0.1.1 新发现的 11 项，共 25 项。</p>
+
+<h3>9.1 0.1.1 已修复（7 项纯内部清理）</h3>
+<ul>
+  <li>INFINITY 常量统一导出</li>
+  <li>findNodes 返回 GraphRecord[]，去 30+ 处 any</li>
+  <li>processEvent 加 async mutex</li>
+  <li>EventLog 加 no-op close()</li>
+  <li>README migrate 措辞修正</li>
+  <li>typegraph 版本锁定</li>
+  <li>declaresEdge 补注释</li>
+</ul>
+
+<h3>9.2 待修复（按风险分级）</h3>
+
+<p><strong>B 类（向后兼容的实现优化，零下游影响）</strong>：</p>
+<ul>
+  <li>valueText 序列化：<code>String(val)</code> 对对象/数组变成 <code>[object Object]</code>，全文索引失效。</li>
+  <li>EventLog 单行损坏导致整个文件读不出：加 try/catch 跳过损坏行。</li>
+  <li>inferVisibility 无幂等：重复调用产生重复 visibility 记录。</li>
+  <li>birthEntity / processEvent.change 无事务回滚：多步写包 SQLite 事务。</li>
+  <li>killEntity / closeRelation 全表扫描：用 SDK <code>query()</code> 按 entityId 索引。</li>
+</ul>
+
+<p><strong>C 类（向后兼容的 API 扩展）</strong>：</p>
+<ul>
+  <li>migrate 接口签名：接受 <code>WorldGraphOptions | { dbPath: string }</code> 两种。</li>
+  <li>getEntityHistory 等支持 <code>recordedAsOf</code>。</li>
+  <li>写入方法加可选 <code>{ strict: boolean }</code> 引用完整性校验。</li>
+  <li>新增 <code>birthEntityUpsert</code> / <code>setVisibilityIfAbsent</code> 幂等版本。</li>
+</ul>
+
+<p><strong>D 类（需消费方对齐的破坏性修复）</strong>：</p>
+<ul>
+  <li>storyTime 格式校验（接受格式变化会让消费方现有数据失效）。</li>
+  <li>birth 事件 newFacts 语义（同 property 覆盖、entityId 丢失）。</li>
+  <li>birth 事件保留 modality（当前硬编码 "fact"）。</li>
+  <li>killEntity 级联关 Relation（死亡实体从关系查询消失）。</li>
+  <li>VisibilityNode.state 单值枚举（删字段会改 schema_hash）。</li>
+  <li>事务时间两套钟统一（recordedAt 字段语义变化）。</li>
+</ul>
+
+<h3>9.3 监控建议</h3>
+
+<p>部署后建议在服务层加这些日志/指标：</p>
+<ul>
+  <li><code>processEvent</code> 调用频率与延迟分布。</li>
+  <li><code>getEntityAt</code> / <code>getCharacterView</code> 查询延迟（数据量大后可能慢）。</li>
+  <li>事件日志行数增长率（异常增长可能表示上层重复触发）。</li>
+  <li>SQLite WAL 大小（持续增长不回落可能表示检查点失败）。</li>
+</ul>
+
+<span class="anchor" id="app-a"></span>
+<h2>附录 A：完整 Quick Start</h2>
+
+<pre><code>import { WorldGraph } from "underworld-graph";
+import path from "node:path";
+
+// 1. 创建实例
+const wg = await WorldGraph.create({
+  dbPath: path.join(process.cwd(), "data", "world.db"),
+  eventLogPath: path.join(process.cwd(), "data", "events.jsonl"),
+});
+
+try {
+  // 2. 诞生实体
+  await wg.birthEntity("ent-macbeth", "character", { title: "Thane of Glamis" }, "act1-scene1");
+  await wg.birthEntity("ent-inverness", "location", { temp: "cold" }, "act1-scene1");
+
+  // 3. 建立关系
+  await wg.addRelation("ent-macbeth", "ent-inverness", "located_in", "act1-scene1");
+
+  // 4. 事件驱动状态变更
+  await wg.processEvent({
+    eventId: "evt-1",
+    type: "change",
+    storyTime: "act1-scene4",
+    entityId: "ent-inverness",
+    invalidated: [],
+    newFacts: [
+      { entityId: "ent-inverness", property: "visitor", value: "Duncan", modality: "fact" },
+    ],
+    userInput: "邓肯王来到因弗内斯城堡",
+  });
+
+  // 5. 推断可见性（同地点互相可见）
+  await wg.inferVisibility("act1-scene4");
+
+  // 6. 查询角色视角
+  const view = await wg.getCharacterView("ent-macbeth", "act1-scene4", { modalityFilter: ["fact"] });
+  console.log("Macbeth 视角可见声明数:", view.length);
+
+  // 7. 回溯因果链
+  const chain = await wg.traceCauses("evt-1");
+  console.log("因果链长度:", chain.length);
+
+  // 8. 双时态查询（retcon 隔离）
+  const recordedNow = await wg.recordedNow();
+  // ... 此处可能有 retcon 写入 ...
+  const snapshot = await wg.getEntityAt("ent-macbeth", "act1-scene4", { recordedAsOf: recordedNow });
+  console.log("retcon 隔离快照:", snapshot);
+
+  // 9. 全文检索
+  const results = await wg.search.fulltext({
+    node: "Fact",
+    query: "visitor",
+    limit: 10,
+  });
+  console.log("全文检索结果:", results);
+
+  // 10. 消亡实体
+  await wg.killEntity("ent-inverness", "act5-scene1");
+} finally {
+  wg.close();
+}</code></pre>
+
+<span class="anchor" id="app-b"></span>
+<h2>附录 B：环境变量建议</h2>
+
+<p>部署时建议你的服务读取这些环境变量：</p>
+
+<table>
+  <thead><tr><th>变量</th><th>默认值</th><th>说明</th></tr></thead>
+  <tbody>
+    <tr><td><code>WG_DATA_DIR</code></td><td><code>./data</code></td><td>db 与 events.jsonl 的存放目录</td></tr>
+    <tr><td><code>WG_DB_PATH</code></td><td><code>${WG_DATA_DIR}/world.db</code></td><td>显式覆盖 db 路径</td></tr>
+    <tr><td><code>WG_EVENT_LOG_PATH</code></td><td><code>${WG_DATA_DIR}/events.jsonl</code></td><td>显式覆盖日志路径</td></tr>
+    <tr><td><code>NODE_ENV</code></td><td>-</td><td><code>production</code> 时启用优化</td></tr>
+    <tr><td><code>PI_DEBUG</code></td><td>-</td><td>设为 <code>off</code> 时关闭调试模块</td></tr>
+  </tbody>
+</table>
+
+<span class="anchor" id="app-c"></span>
+<h2>附录 C：版本发布检查清单</h2>
+
+<p>发布新版本时：</p>
+
+<ul>
+  <li>[ ] 跑 <code>npm run typecheck</code></li>
+  <li>[ ] 跑 <code>npm test</code>（59 用例全绿）</li>
+  <li>[ ] 跑 <code>npm run smoke</code>（端到端冒烟通过）</li>
+  <li>[ ] 更新 <code>CHANGELOG.md</code></li>
+  <li>[ ] bump <code>package.json</code> version</li>
+  <li>[ ] 按 AGENTS.md 分支策略：建分支 → 提交 → ff-only 合并 master</li>
+  <li>[ ] <code>git push origin master</code></li>
+  <li>[ ] <code>git tag v&lt;x.y.z&gt;</code> + <code>git push origin v&lt;x.y.z&gt;</code>（触发 CI publish）</li>
+  <li>[ ] 或手动 <code>npm publish --registry=https://registry.npmjs.org</code></li>
+</ul>
+
+<hr>
+
+<p>
+  <strong>文档版本</strong>：对应 <code>underworld-graph@0.1.1</code>，2026-08-03 撰写。<br>
+  <strong>源码版本</strong>：commit <code>9d5e28d</code>（master HEAD）。<br>
+  <strong>问题反馈</strong>：<a href="https://github.com/lmy414/underworld-graph/issues">GitHub Issues</a>。
+</p>
+
+</main>
+
+</div>
+</body>
+</html>
