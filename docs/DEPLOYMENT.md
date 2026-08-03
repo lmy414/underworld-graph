@@ -2,25 +2,7 @@
 
 > 版本：`0.1.1`　·　协议：GPL-3.0-only　·　作者：lmy414　·　npm 包名：`underworld-graph`
 >
-> 本文档面向"要把这个包部署到自己服务器并理解每行代码"的工程师。逐文件、逐 token
-> 解读源码，标注每个 import / 类型 / 函数 / 关键语句的语义、设计意图与已知边界。
-
----
-
-## 维护约定（2026-08-03 起）
-
-本 Markdown 文档与同目录的 `DEPLOYMENT.html` 是**同一份内容的两种形态**。
-每次更新文档内容时，**必须同步更新两者**：
-
-1. 先改 `docs/DEPLOYMENT.md`（源）
-2. 再用本 HTML 的同名文件覆盖（`docs/DEPLOYMENT.html`）
-3. 两者在同一 commit 内提交，commit message 标注 `docs:` 前缀
-4. HTML 是自包含单页（内嵌 CSS，无外部依赖），可直接部署到任意静态服务器
-
-**验证方法**：HTML 顶部"对应版本"字段必须与 `package.json` 的 `version` 一致；
-底部"文档版本"commit hash 必须与当前 HEAD 一致。
-
----
+> 如果你对这个项目感兴趣，可以看看下面的内容，欢迎提出修改建议，我会认真采纳。
 
 ## 目录
 
@@ -1735,3 +1717,17 @@ try {
 **文档版本**：对应 `underworld-graph@0.1.1`，2026-08-03 撰写。
 **源码版本**：commit `9d5e28d`（master HEAD）。
 **问题反馈**：[GitHub Issues](https://github.com/lmy414/underworld-graph/issues)。
+
+---
+
+## 维护约定
+
+本 Markdown 文档与同目录的 `DEPLOYMENT.html` 是同一份内容的两种形态。
+每次更新文档内容时，同步更新两者：
+
+1. 先改 `docs/DEPLOYMENT.md`（源）
+2. 再覆盖 `docs/DEPLOYMENT.html`
+3. 两者在同一 commit 内提交，commit message 标注 `docs:` 前缀
+4. HTML 是自包含单页（内嵌 CSS，无外部依赖），可直接部署到任意静态服务器
+
+验证：HTML 顶部"对应版本"字段与 `package.json` 的 `version` 一致；底部"文档版本"commit hash 与当前 HEAD 一致。
