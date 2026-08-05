@@ -1729,7 +1729,7 @@ try {
 ---
 
 **文档版本**：对应 `underworld-graph@0.1.2`，2026-08-05 更新。
-**源码版本**：commit `9d5e28d`（master HEAD）。
+**源码版本**：commit `e74d2c8`（master HEAD）。
 **问题反馈**：[GitHub Issues](https://github.com/lmy414/underworld-graph/issues)。
 
 ---
