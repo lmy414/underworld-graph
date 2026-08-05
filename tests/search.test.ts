@@ -32,6 +32,19 @@ test("fulltext 检索支持中文", async () => {
   wg.close();
 });
 
+test("valueText 序列化：对象 value 可被全文检索命中", async () => {
+  const wg = await setupWg();
+  await wg.birthEntity("castle-1", "location", { inventory: { weapon: "sword", gold: 5 } }, "act1-scene1");
+  const hits = await wg.search.fulltext("Fact", { query: "sword", limit: 10 });
+  assert.ok(
+    hits.some((h: any) => h.node?.entityId === "castle-1"),
+    "对象 value 应序列化为 JSON 文本而非 [object Object]",
+  );
+  const inventoryHit = hits.find((h: any) => h.node?.entityId === "castle-1");
+  assert.equal(inventoryHit?.node?.valueText, '{"weapon":"sword","gold":5}');
+  wg.close();
+});
+
 test("vector 检索需传入 fieldPath + queryEmbedding", async () => {
   const wg = await setupWg();
   // 为 macbeth 实体设置 embedding（向量第一维为 1，其余为 0）

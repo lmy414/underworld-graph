@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, rmSync, appendFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { EventLog } from "../src/event-log.js";
@@ -63,6 +63,41 @@ test("traceBack causedBy 指向不存在的事件时停止", withTempLog(async (
   const chain = await log.traceBack("evt-y");
   assert.equal(chain.length, 1);
   assert.equal(chain[0].eventId, "evt-y");
+}));
+
+test("readAll 跳过损坏行（容错，不丢全部日志）", withTempLog(async (log, dir) => {
+  await log.append({ eventId: "evt-ok-1", type: "birth", storyTime: "t1", entityId: "e1" });
+  appendFileSync(join(dir, "events.jsonl"), "not-json-line\n", "utf-8");
+  await log.append({ eventId: "evt-ok-2", type: "change", storyTime: "t2", entityId: "e1", causedBy: "evt-ok-1" });
+  const all = await log.readAll();
+  assert.deepEqual(all.map((e) => e.eventId), ["evt-ok-1", "evt-ok-2"], "损坏行应被跳过");
+}));
+
+test("readAll 跳过形状不符的合法 JSON 行", withTempWg(async (wg, dir) => {
+  await wg.processEvent({ eventId: "evt-ok-1", type: "birth", storyTime: "t1", entityId: "e1" });
+  appendFileSync(join(dir, "events.jsonl"), '{"foo":"bar"}\n', "utf-8");
+  await wg.processEvent({ eventId: "evt-ok-2", type: "change", storyTime: "t2", entityId: "e1" });
+  const events = await wg.getAllEvents();
+  assert.deepEqual(events.map((e) => e.eventId), ["evt-ok-1", "evt-ok-2"], "形状不符行应被跳过且 sort 不炸");
+}));
+
+test("processEvent DB 写入失败时事务回滚：状态不变、日志保留审计", withTempWg(async (wg) => {
+  await wg.birthEntity("ent-a", "character", { status: "alive" }, "t1");
+  await assert.rejects(
+    wg.processEvent({
+      eventId: "evt-death-missing",
+      type: "death",
+      storyTime: "t2",
+      entityId: "ent-missing",
+    }),
+    /not found/,
+    "对不存在实体 death 应抛错（killEntity 校验）",
+  );
+  const snap = await wg.getEntityAt("ent-a", "t2");
+  assert.ok(snap, "既有实体状态不应被部分应用破坏");
+  assert.equal(snap!.properties.find((d: any) => d.property === "status")?.value, "alive");
+  const chain = await wg.traceCauses("evt-death-missing");
+  assert.equal(chain.length, 1, "失败事件仍留在 JSONL（因果链审计语义）");
 }));
 
 test("processEvent type=birth 等价 birthEntity", withTempWg(async (wg) => {

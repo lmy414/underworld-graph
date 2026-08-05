@@ -1,5 +1,6 @@
 import type { WorldGraph } from "./world-graph.js";
 import type { VisibilityDeclaration, StateDeclaration, Modality } from "./types.js";
+import { INFINITY } from "./types.js";
 
 /**
  * character_view 五步过滤（飞书文档"步骤 5"，2026-07-22 语义修订：知识持续）
@@ -54,7 +55,21 @@ export async function inferVisibility(wg: WorldGraph, storyTime: string): Promis
     const targetDecls = await wg.getEntityAt(rel.targetId, storyTime);
     if (!targetDecls) continue;
     for (const decl of targetDecls.properties) {
-      const validFrom = rel.validFrom > decl.validFrom ? rel.validFrom : decl.validFrom;
+      // 幂等 + 撤销回填保护（2026-08-05，评审 P1）：
+      // 全历史判定（含已闭合记录），而非只看当前有效窗口：
+      // 1. 该声明在 storyTime 已对该角色可见 → 跳过（重复推断不产生重复 vis- 记录）
+      // 2. 曾撤销过（存在 validTo <= storyTime 的闭合记录）→ 新记录 validFrom 取当前
+      //    推断时刻，避免回填到撤销时刻之前、静默覆盖撤销区间
+      const mine = (await wg.getVisibilityForDeclaration(decl.declarationId))
+        .filter((v) => v.characterId === rel.sourceId);
+      if (mine.some((v) => v.validFrom <= storyTime
+        && (v.validTo === INFINITY || storyTime < v.validTo))) {
+        continue;
+      }
+      let validFrom = rel.validFrom > decl.validFrom ? rel.validFrom : decl.validFrom;
+      if (mine.some((v) => v.validTo !== INFINITY && v.validTo <= storyTime)) {
+        validFrom = storyTime;
+      }
       if (validFrom > storyTime) continue;
       await wg.setVisibility(rel.sourceId, decl.declarationId, {
         state: "known",

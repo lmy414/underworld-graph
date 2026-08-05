@@ -19,10 +19,21 @@ export class EventLog {
   async readAll(): Promise<EventRecord[]> {
     if (!existsSync(this.path)) return [];
     const content = readFileSync(this.path, "utf-8");
-    return content
-      .split("\n")
-      .filter((line) => line.trim().length > 0)
-      .map((line) => JSON.parse(line) as EventRecord);
+    const out: EventRecord[] = [];
+    for (const line of content.split("\n")) {
+      if (line.trim().length === 0) continue;
+      try {
+        // 容错读取（2026-08-05）：语法损坏行与"合法 JSON 但形状不符"（缺字段/类型错）
+        // 都跳过，不因一条坏数据丢掉全部日志，也不让坏形状行炸掉调用方（如 getAllEvents 的 sort）
+        const parsed = JSON.parse(line) as unknown;
+        const result = EventRecord.safeParse(parsed);
+        if (!result.success) continue;
+        out.push(result.data);
+      } catch {
+        continue;
+      }
+    }
+    return out;
   }
 
   async traceBack(eventId: string): Promise<EventRecord[]> {

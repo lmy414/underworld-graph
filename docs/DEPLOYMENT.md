@@ -1,6 +1,6 @@
 # underworld-graph 部署与源码指南
 
-> 版本：`0.1.1`　·　协议：GPL-3.0-only　·　作者：lmy414　·　npm 包名：`underworld-graph`
+> 版本：`0.1.2`　·　协议：GPL-3.0-only　·　作者：lmy414　·　npm 包名：`underworld-graph`
 >
 > 如果你对这个项目感兴趣，可以看看下面的内容，欢迎提出修改建议，我会认真采纳。
 
@@ -89,7 +89,7 @@ npm --version
 
 | 形态 | 适用场景 | 关键步骤 |
 |---|---|---|
-| **A. 作为依赖集成到你的服务** | 生产推荐 | 你的服务 `package.json` 加 `"underworld-graph": "0.1.1"`，自己的进程管 SQLite 文件路径 |
+| **A. 作为依赖集成到你的服务** | 生产推荐 | 你的服务 `package.json` 加 `"underworld-graph": "0.1.2"`，自己的进程管 SQLite 文件路径 |
 | **B. 从源码克隆自部署** | 调试 / 二次开发 | `git clone` + `npm install` + `npm run build`，再被你的服务以 file: 引用 |
 | **C. 纯 npm 安装验证** | 试用 | `npm install underworld-graph` 后写脚本调用 |
 
@@ -99,7 +99,7 @@ npm --version
 
 ```bash
 cd /opt/your-service
-npm install underworld-graph@0.1.1
+npm install underworld-graph@0.1.2
 # 此时 better-sqlite3 + sqlite-vec 会被自动编译
 ```
 
@@ -137,7 +137,7 @@ sudo chown -R your-service:your-service /var/lib/your-service/world
 # 1. 克隆
 git clone git@github.com:lmy414/underworld-graph.git
 cd underworld-graph
-git checkout v0.1.1   # 或 master
+git checkout v0.1.2   # 或 master
 
 # 2. 装依赖（会编译 better-sqlite3 原生模块）
 npm install
@@ -298,7 +298,7 @@ underworld-graph/
 │   ├── types.ts                # zod schema + 类型常量
 │   ├── event-log.ts            # JSONL 事件日志
 │   ├── character-view.ts       # 角色视角 + 可见性推断
-│   └── world-graph.ts          # 核心引擎（最大文件，931 行）
+│   └── world-graph.ts          # 核心引擎（最大文件，1030 行）
 ├── tests/                      # 12 个测试文件，59 个用例
 │   ├── api.test.ts             # 公共 API 暴露面
 │   ├── character-view.test.ts  # 角色视角
@@ -337,7 +337,7 @@ underworld-graph/
 逐字段：
 
 - `name`: `"underworld-graph"` — npm 包名（无 scope，公开包）。
-- `version`: `"0.1.1"` — 当前发布版本。
+- `version`: `"0.1.2"` — 当前发布版本。
 - `description`: `"Bi-temporal narrative state graph for fiction-writing engines."`
   — 一句话定位。
 - `keywords`: 8 个发现关键词：`narrative / story / graph / bi-temporal / sqlite /
@@ -655,7 +655,9 @@ export class EventLog {
 `EventRecord.parse` 应用默认值（`source` 缺省 `"engine"`），日志行始终是完整
 EventRecord。`+ "\n"` 保证每行一个 JSON。
 
-**已知问题**：单行 JSON 损坏会让整个 `readAll` 抛错。B 类修复将加 try/catch 跳过损坏行。
+**已修复（0.1.2）**：单行损坏不再影响整体 —— `readAll` 逐行 try/catch +
+`EventRecord.safeParse`，语法损坏与形状不符（合法 JSON 但缺字段/类型错）的行均跳过
+（记 stderr），剩余行正常读出。
 
 ```typescript
   async readAll(): Promise<EventRecord[]> {
@@ -670,7 +672,8 @@ EventRecord。`+ "\n"` 保证每行一个 JSON。
 
 文件不存在返回空数组。读全文 split 行，过滤空行，逐行 `JSON.parse`。
 
-**已知问题**：全文读取 + 全建 Map，日志上规模后内存与时间开销显著。B 类修复将改流式读取。
+**已知问题（未修复）**：全文读取 + 全建 Map，日志上规模后内存与时间开销显著。
+流式读取属性能优化项，与 §9.2 的 B5 同批排期。
 
 ```typescript
   async traceBack(eventId: string): Promise<EventRecord[]> {
@@ -780,11 +783,13 @@ export async function inferVisibility(wg: WorldGraph, storyTime: string): Promis
 遍历 storyTime 时刻所有 `located_in` 关系，对每条关系把 target 实体的所有有效声明
 标记为 source 角色可见。`validFrom` 取角色进入时间和声明时间中较晚者。
 
-**已知问题**：无幂等。重复调用同 storyTime 会产生重复 visibility 记录。B 类修复将加查重。
+**已修复（0.1.2）**：inferVisibility 幂等 —— 写入前做全历史判定（含已闭合记录），
+当前可见则跳过；存在 `validTo <= storyTime` 的撤销记录时，新可见性 validFrom 取当前
+推断时刻，不回填到撤销区间之前（含回归测试）。
 
 ### 5.8 `src/world-graph.ts` — 核心图引擎
 
-**职责**：本包最大文件（931 行），定义 TypeGraph schema、`WorldGraph` 类、所有公共 API
+**职责**：本包最大文件（1030 行），定义 TypeGraph schema、`WorldGraph` 类、所有公共 API
 实现。逐段拆解。
 
 #### Imports（行 1-22）
@@ -1155,8 +1160,16 @@ private async _processEvent(input: EventRecordInput): Promise<void> {
 }
 ```
 
-0.1.1 拆为 `processEvent`（加锁）+ `_processEvent`（实际逻辑）。`recordedAt`
-缺省填充当前时间，调用方显式传入时优先。先写日志（保证因果链可回溯），再按 type 分派。
+0.1.1 拆为 `processEvent`（加锁）+ `_processEvent`（实际逻辑）。0.1.2 再拆
+`_applyEvent(tx, event)`：先 append JSONL（审计优先，即使状态回滚日志也保留），
+再 `runInTransaction` 包 SDK `store.transaction(tx)`，事务内所有节点读写走
+`tx.nodes`，中途失败整体回滚，不留半成品。`recordedAt` 缺省填充当前时间，
+调用方显式传入时优先，再按 type 分派。
+
+**事务约束（0.1.2 实测）**：外层不能用 `db.exec("BEGIN")` 包裹 —— SDK 写入自带
+事务，会报 "cannot start a transaction within a transaction"；事务内穿插 `store`
+直读会触发 SDK deadlock 报错，必须统一走 `tx` 上下文。`birthEntity` / `killEntity`
+重构为 core 方法 + 双路由（普通调用走 `store.nodes`，事务内复用 `tx.nodes`）。
 
 **birth 分支的已知问题**：`Object.fromEntries((event.newFacts ?? []).map((f) => [f.property, f.value]))`
 同 property 多条 newFacts 互相覆盖只留最后一条；newFacts.entityId 被完全忽略，
@@ -1569,17 +1582,18 @@ sudo systemctl restart your-service
 | A6 | typegraph 版本 `^0.40.0` 未锁 minor | minor 升级可能引入不兼容 | `package.json` 改 `~0.40.0`（锁 minor 允许 patch） | ✅ 0.1.1 已修 |
 | A7 | [declaresEdge](file:///d:/claude/pi-ex/underworld-graph/src/world-graph.ts) 定义但从不使用 | 后人误以为是 dead code 删除，触发 schema_hash 变化 | 补注释说明"预留未用，删除会触发 MIGRATION_ERROR"，**不删除** | ✅ 0.1.1 已修 |
 
-### 9.2 B 类：待修复 — 向后兼容的实现优化（5 项）
+### 9.2 B 类：已修复（0.1.2，4 项）+ 待修复（1 项）
 
-> API 不变，行为更合理，零下游影响。可立即修，但建议先补 P1 测试用例作为安全网。
+> API 不变，行为更合理，零下游影响。B1-B4 已在 0.1.2 修复，每项均配套回归测试；
+> B5（性能）仍待修，先做基准测试确认量级收益。
 
-| # | 问题 | 影响 | 修复方案 | 风险点 |
-|---|---|---|---|---|
-| B1 | [valueText 序列化错误](file:///d:/claude/pi-ex/underworld-graph/src/world-graph.ts) — `String(val)` 对对象/数组变成 `[object Object]` | 全文索引建在错误文本上，对象类 value 无法被检索 | `typeof val === 'object' ? JSON.stringify(val) : String(val)` | valueText 不在公开输出里（评审 P2-8 已记），消费方读不到，零影响 |
-| B2 | [EventLog 单行损坏全文件读不出](file:///d:/claude/pi-ex/underworld-graph/src/event-log.ts) — `readAll` 任意一行 `JSON.parse` 失败会抛错 | 日志文件局部损坏导致整个 `traceBack` / `getAllEvents` 不可用 | `readAll` 加 try/catch 跳过损坏行，记到 stderr | 消费方不太可能依赖"抛错"语义 |
-| B3 | [inferVisibility 无幂等](file:///d:/claude/pi-ex/underworld-graph/src/character-view.ts) — 重复调用同 storyTime 产生重复 visibility 记录 | 同一 (characterId, declarationId) 多条 visibility 记录，查询结果重复 | `setVisibility` 前查重，已存在则跳过 | 消费方不太可能依赖"重复调用产生重复记录" |
-| B4 | [birthEntity / processEvent.change 无事务回滚](file:///d:/claude/pi-ex/underworld-graph/src/world-graph.ts) — 多步写中途失败留下半成品 | Entity 已建但 Fact 没建全，或旧声明已闭合但新声明没写入，状态不一致 | 多步写包 SQLite 事务（better-sqlite3 原生支持同步事务），失败回滚 | 需明确失败时日志语义：建议日志行尾追加 `"_failed": true` 标记，不改原格式 |
-| B5 | [killEntity / closeRelation 全表扫描](file:///d:/claude/pi-ex/underworld-graph/src/world-graph.ts) 等 6 处 — 用 `find()` 取全量再 JS filter | 数据量大后查询慢（O(n) 扫描） | 用 SDK `query()` 按 entityId 索引替代 find() + JS filter | 需先做基准测试确认量级收益 |
+| # | 问题 | 影响 | 修复方案 | 风险点 | 状态 |
+|---|---|---|---|---|---|
+| B1 | [valueText 序列化错误](file:///d:/claude/pi-ex/underworld-graph/src/world-graph.ts) — `String(val)` 对对象/数组变成 `[object Object]` | 全文索引建在错误文本上，对象类 value 无法被检索 | 抽 `serializeValueText()` helper：对象 JSON.stringify、Date 走 ISO（Invalid Date 兜底 String）、循环引用回退 String | valueText 不在公开输出里（评审 P2-8 已记），消费方读不到，零影响 | ✅ 0.1.2 已修 |
+| B2 | [EventLog 单行损坏全文件读不出](file:///d:/claude/pi-ex/underworld-graph/src/event-log.ts) — `readAll` 任意一行 `JSON.parse` 失败会抛错 | 日志文件局部损坏导致整个 `traceBack` / `getAllEvents` 不可用 | `readAll` 逐行 try/catch + `EventRecord.safeParse`，语法损坏与形状不符行跳过（记 stderr） | 消费方不太可能依赖"抛错"语义 | ✅ 0.1.2 已修 |
+| B3 | [inferVisibility 无幂等](file:///d:/claude/pi-ex/underworld-graph/src/character-view.ts) — 重复调用同 storyTime 产生重复 visibility 记录 | 同一 (characterId, declarationId) 多条 visibility 记录，查询结果重复 | 写入前全历史判定（含已闭合）：当前可见跳过；存在 `validTo <= storyTime` 撤销记录则 validFrom 取当前时刻 | 消费方不太可能依赖"重复调用产生重复记录" | ✅ 0.1.2 已修 |
+| B4 | [birthEntity / processEvent.change 无事务回滚](file:///d:/claude/pi-ex/underworld-graph/src/world-graph.ts) — 多步写中途失败留下半成品 | Entity 已建但 Fact 没建全，或旧声明已闭合但新声明没写入，状态不一致 | 多步写包 SDK `store.transaction(tx)`（SDK 自带事务，外层 raw BEGIN 会冲突），事务内读写走 `tx.nodes`，失败整体回滚 | 日志语义已定：JSONL 先写保留审计，状态回滚；未加 `_failed` 标记 | ✅ 0.1.2 已修 |
+| B5 | [killEntity / closeRelation 全表扫描](file:///d:/claude/pi-ex/underworld-graph/src/world-graph.ts) 等 6 处 — 用 `find()` 取全量再 JS filter | 数据量大后查询慢（O(n) 扫描） | 用 SDK `query()` 按 entityId 索引替代 find() + JS filter | 需先做基准测试确认量级收益 | 待修 |
 
 ### 9.3 C 类：待修复 — 向后兼容的 API 扩展（4 项）
 
@@ -1616,8 +1630,8 @@ sudo systemctl restart your-service
 - `getEntityAt` / `getCharacterView` 查询延迟（数据量大后可能慢）。
 - 事件日志行数增长率（异常增长可能表示上层重复触发，与 B3 幂等问题相关）。
 - SQLite WAL 大小（持续增长不回落可能表示检查点失败）。
-- B 类修复落地后，建议加"损坏日志行计数"指标（对应 B2）。
-- B 类修复落地后，建议加"重复 visibility 跳过计数"指标（对应 B3）。
+- 0.1.2 已落地 B2/B3 修复；建议加"损坏日志行跳过计数"与"重复 visibility 跳过计数"
+  指标，观察其发生频率（长期接近 0 则说明日志写入与推断逻辑健康）。
 
 ---
 
@@ -1703,7 +1717,7 @@ try {
 发布新版本时：
 
 - [ ] 跑 `npm run typecheck`
-- [ ] 跑 `npm test`（59 用例全绿）
+- [ ] 跑 `npm test`（66 用例全绿）
 - [ ] 跑 `npm run smoke`（端到端冒烟通过）
 - [ ] 更新 `CHANGELOG.md`
 - [ ] bump `package.json` version
@@ -1714,7 +1728,7 @@ try {
 
 ---
 
-**文档版本**：对应 `underworld-graph@0.1.1`，2026-08-03 撰写。
+**文档版本**：对应 `underworld-graph@0.1.2`，2026-08-05 更新。
 **源码版本**：commit `9d5e28d`（master HEAD）。
 **问题反馈**：[GitHub Issues](https://github.com/lmy414/underworld-graph/issues)。
 

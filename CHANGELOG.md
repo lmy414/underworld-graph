@@ -5,6 +5,33 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.2] - 2026-08-05
+
+### Fixed
+- B 类实现优化 4 项（对应 0.1.1 Notes「后续待修」清单，均不破坏公共 API）：
+  - **valueText 序列化**：`String(value)` → `serializeValueText()`。对象/数组 value
+    不再落 `"[object Object]"`，改为 JSON 序列化（Date 走 ISO、循环引用回退 String），
+    fulltext 检索可命中对象内部文本。
+  - **EventLog 容错**：`readAll` 遇损坏行跳过而非整体抛错，单行坏数据不丢全部日志。
+  - **inferVisibility 幂等**：写入前检查该角色对目标声明是否已有未撤销可见性，
+    重复执行不再产生重复 `vis-` 记录。
+  - **processEvent 事务回滚**：DB 写入改走 SDK `store.transaction(tx)`，birth/death/
+    change 的多步写原子提交，中途失败整体回滚；JSONL 先写保持因果链审计语义。
+    `birthEntity`/`killEntity` 重构为 core 方法 + store.nodes 路由，事务内复用 tx.nodes。
+  - **inferVisibility 撤销回填修复**（审查 P1）：去重改为全历史判定（含已闭合记录）；
+    存在 `validTo <= storyTime` 的闭合记录时，新记录 validFrom 取当前推断时刻，
+    避免回填到撤销时刻之前静默覆盖撤销区间。
+  - **Invalid Date 兜底**（审查 P2）：`serializeValueText` 的 Date 分支包 try/catch，
+    `toISOString()` 失败回退 `String()`，不再抛 RangeError。
+  - **EventLog 形状校验**（审查 P2）：`readAll` 用 `EventRecord.safeParse` 校验，
+    "合法 JSON 但缺字段/类型错"的行同样跳过，避免 `getAllEvents` 的 sort 炸 TypeError。
+
+### Notes
+- 事务实现说明：TypeGraph store 写入自带事务（raw BEGIN 会冲突），故外层不能
+  再用 `db.exec("BEGIN")` 包裹；改用官方 `store.transaction()`，事务内读写必须
+  走 `tx` 上下文（穿插 `store` 直读会触发 SDK deadlock 报错）。
+- 验证：`npm run typecheck` 通过，`npm test` 66/66 全绿，`npm run smoke` 通过。
+
 ## [0.1.1] - 2026-08-03
 
 ### Changed

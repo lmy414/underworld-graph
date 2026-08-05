@@ -50,6 +50,15 @@ test("killEntity 闭合实体 validTo", withTempWg(async (wg) => {
   assert.equal(after, null, "消亡时间点应返回 null");
 }));
 
+test("birthEntity 接受 Invalid Date 值（valueText 序列化兜底不抛错）", withTempWg(async (wg) => {
+  await assert.doesNotReject(
+    wg.birthEntity("ent-a", "character", { timestamp: new Date("not-a-date") }, "t1"),
+    "Invalid Date 不应让序列化抛 RangeError",
+  );
+  const snap = await wg.getEntityAt("ent-a", "t1");
+  assert.ok(snap, "实体应正常创建");
+}));
+
 test("addRelation + getRelations", withTempWg(async (wg) => {
   await wg.birthEntity("ent-macbeth", "character", {}, "act1-scene1");
   await wg.birthEntity("ent-inverness", "location", {}, "act1-scene1");

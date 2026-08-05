@@ -53,6 +53,13 @@ console.log(snap);
 wg.close();
 ```
 
+## storyTime 约定
+
+`storyTime` / `validFrom` / `validTo` 是纯字符串，时态查询按字典序比较
+（`validFrom <= storyTime < validTo`）。请使用可字典序比较的格式（如
+`act01-scene01` 零填充，或 ISO 8601），避免 `act1-scene10` 排在
+`act1-scene2` 之前的问题。`INFINITY`（`"Infinity"`）表示未闭合，比较时须特判。
+
 ## API
 
 ### Factory

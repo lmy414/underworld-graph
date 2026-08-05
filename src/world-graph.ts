@@ -10,7 +10,13 @@ import {
   embedding,
   sqliteVecStrategy,
 } from "@nicia-ai/typegraph";
-import type { HistoryStore, EmbeddingValue, RecordedInstant } from "@nicia-ai/typegraph";
+import type {
+  HistoryStore,
+  EmbeddingValue,
+  RecordedInstant,
+  GraphNodeCollections,
+  TransactionContext,
+} from "@nicia-ai/typegraph";
 import {
   createSqliteBackend,
   generateSqliteMigrationSQL,
@@ -30,6 +36,41 @@ import { EventLog } from "./event-log.js";
  */
 function asEmbedding(vec: number[]): EmbeddingValue {
   return vec as unknown as EmbeddingValue;
+}
+
+/**
+ * 把任意 value 序列化为可全文检索的 valueText。
+ *
+ * 修复（2026-08-05）：纯 `String(val)` 对对象/数组产生 `"[object Object]"`，
+ * 使 fulltext 检索永远命中垃圾文本。遵循：
+ * - null/undefined 显式处理（undefined 不产生可检索文本）
+ * - 原始类型直接 String()
+ * - Date 走 ISO 字符串
+ * - 对象/数组 JSON.stringify（循环引用失败回退 String()）
+ */
+function serializeValueText(value: unknown): string {
+  if (value === null) return "null";
+  if (value === undefined) return "";
+  if (typeof value === "string") return value;
+  if (typeof value === "object" && value instanceof Date) {
+    try {
+      return value.toISOString();
+    } catch {
+      // Invalid Date：回退 String()（"Invalid Date"），与旧行为一致不抛错
+      return String(value);
+    }
+  }
+  if (typeof value === "number" || typeof value === "boolean" || typeof value === "bigint") {
+    return String(value);
+  }
+  if (typeof value === "object") {
+    try {
+      return JSON.stringify(value);
+    } catch {
+      return String(value);
+    }
+  }
+  return String(value);
 }
 
 /**
@@ -150,6 +191,13 @@ const graph = defineGraph({
   },
 });
 
+/**
+ * 节点集合访问器 — `store.nodes` 与事务上下文 `tx.nodes` 同构
+ * （GraphNodeCollections<typeof graph>），写入方法按此抽象路由：
+ * 公开方法走 store.nodes（单步写），processEvent 事务内走 tx.nodes（多步写原子）。
+ */
+type NodeAccessor = GraphNodeCollections<typeof graph>;
+
 export interface WorldGraphOptions {
   dbPath: string;
   eventLogPath: string;
@@ -226,6 +274,23 @@ export class WorldGraph {
     } finally {
       release();
     }
+  }
+
+  /**
+   * 在 SDK store 事务内执行一组写入。
+   *
+   * 修复（2026-08-05）：processEvent 的 birth/change 本质是多步 store 写
+   * （Entity + N 条 Fact / 闭合旧声明 + 写入新声明），中途失败会留下半更新状态。
+   * `store.transaction` 是 TypeGraph 官方事务入口，回调内读写必须走 tx 上下文
+   * （tx.nodes），不能穿插 store 直读（同后端会 deadlock，SDK 显式报错）。
+   *
+   * 语义：JSONL 先写入（审计因果链），DB 状态在此事务内原子提交。
+   * 若 DB 提交失败，事件仍留在日志中（标记"曾尝试"），可被消费方对账。
+   */
+  private runInTransaction<T>(
+    fn: (tx: TransactionContext<typeof graph>) => Promise<T>,
+  ): Promise<T> {
+    return this.store.transaction(fn);
   }
 
   /**
@@ -349,7 +414,26 @@ export class WorldGraph {
     storyTime: string,
     summary?: string,
   ): Promise<void> {
-    await this.store.nodes.Entity.create({
+    await this.birthEntityCore(
+      this.store.nodes,
+      entityId,
+      entityType,
+      initialProps,
+      storyTime,
+      summary,
+    );
+  }
+
+  /** birthEntity 实际写入逻辑：可走 store.nodes（公开方法）或 tx.nodes（processEvent 事务内） */
+  private async birthEntityCore(
+    nodes: NodeAccessor,
+    entityId: string,
+    entityType: EntityType,
+    initialProps: Record<string, unknown>,
+    storyTime: string,
+    summary?: string,
+  ): Promise<void> {
+    await nodes.Entity.create({
       entityId,
       type: entityType,
       summary: summary ?? "",
@@ -358,12 +442,12 @@ export class WorldGraph {
     });
     for (const [prop, val] of Object.entries(initialProps)) {
       const declarationId = `decl-${entityId}-${prop}-${storyTime}`;
-      await this.store.nodes.Fact.create({
+      await nodes.Fact.create({
         declarationId,
         entityId,
         property: prop,
         value: val,
-        valueText: String(val),
+        valueText: serializeValueText(val),
         modality: "fact",
         validFrom: storyTime,
         validTo: INFINITY,
@@ -372,17 +456,22 @@ export class WorldGraph {
   }
 
   async killEntity(entityId: string, storyTime: string): Promise<void> {
-    const entities = await this.store.nodes.Entity.find();
+    await this.killEntityCore(this.store.nodes, entityId, storyTime);
+  }
+
+  /** killEntity 实际写入逻辑：可走 store.nodes（公开方法）或 tx.nodes（processEvent 事务内） */
+  private async killEntityCore(nodes: NodeAccessor, entityId: string, storyTime: string): Promise<void> {
+    const entities = await nodes.Entity.find();
     const ent = entities.find(
       (e) => e.entityId === entityId && e.validTo === INFINITY,
     );
     if (!ent) throw new Error(`Entity ${entityId} not found or already dead`);
-    await this.store.nodes.Entity.update(ent.id, { validTo: storyTime });
+    await nodes.Entity.update(ent.id, { validTo: storyTime });
     // 级联关闭该实体所有未闭合 Fact
-    const facts = await this.store.nodes.Fact.find();
+    const facts = await nodes.Fact.find();
     for (const f of facts) {
       if (f.entityId === entityId && f.validTo === INFINITY) {
-        await this.store.nodes.Fact.update(f.id, { validTo: storyTime });
+        await nodes.Fact.update(f.id, { validTo: storyTime });
       }
     }
   }
@@ -518,10 +607,20 @@ export class WorldGraph {
     });
     // 写入 JSONL 事件日志（先写日志，确保因果链可回溯）
     await this.eventLog.append(event);
+    // DB 状态写入包 SDK store 事务：失败整体回滚，不留下半更新。
+    // 事务内所有读写必须走 tx 上下文（穿插 store 直读会 deadlock，SDK 显式报错）。
+    await this.runInTransaction((tx) => this._applyEvent(tx, event));
+  }
 
+  /** processEvent 的 DB 写入部分（仅在 store 事务内调用，读写均走 tx） */
+  private async _applyEvent(
+    tx: TransactionContext<typeof graph>,
+    event: EventRecord,
+  ): Promise<void> {
     switch (event.type) {
       case "birth":
-        await this.birthEntity(
+        await this.birthEntityCore(
+          tx.nodes,
           event.entityId,
           event.entityType ?? "character",
           Object.fromEntries(
@@ -533,29 +632,29 @@ export class WorldGraph {
         break;
 
       case "death":
-        await this.killEntity(event.entityId, event.storyTime);
+        await this.killEntityCore(tx.nodes, event.entityId, event.storyTime);
         break;
 
       case "change":
         // 闭合旧声明
         for (const inv of event.invalidated ?? []) {
-          const facts = await this.store.nodes.Fact.find();
+          const facts = await tx.nodes.Fact.find();
           const oldFact = facts.find(
             (f) => f.declarationId === inv.declarationId && f.validTo === INFINITY,
           );
           if (oldFact) {
-            await this.store.nodes.Fact.update(oldFact.id, { validTo: event.storyTime });
+            await tx.nodes.Fact.update(oldFact.id, { validTo: event.storyTime });
           }
         }
         // 写入新声明
         for (const fact of event.newFacts ?? []) {
           const declarationId = `decl-${fact.entityId}-${fact.property}-${event.storyTime}`;
-          await this.store.nodes.Fact.create({
+          await tx.nodes.Fact.create({
             declarationId,
             entityId: fact.entityId,
             property: fact.property,
             value: fact.value,
-            valueText: String(fact.value),
+            valueText: serializeValueText(fact.value),
             modality: fact.modality,
             validFrom: event.storyTime,
             validTo: INFINITY,

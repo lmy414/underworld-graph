@@ -132,5 +132,8 @@ export const INFRA_RELATIONS: readonly string[] = ["located_in"] as const;
  * 注意：字符串字典序 "I" < "a"，故所有时态比较（validFrom <= t < validTo）
  * 必须先特判 validTo === INFINITY，否则会误判未闭合记录。
  * 任何新加的时态过滤路径都应复用此常量，不要重复字面量。
+ *
+ * 约定：storyTime 使用字典序可比较的字符串（如零填充 `act01-scene01` 或 ISO 8601），
+ * 时态过滤依赖该顺序；非零填充格式（如 `act1-scene10`）会错误地排在 `act1-scene2` 之前。
  */
 export const INFINITY = "Infinity";
