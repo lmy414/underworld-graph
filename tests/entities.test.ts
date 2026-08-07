@@ -77,3 +77,145 @@ test("closeRelation 闭合关系", withTempWg(async (wg) => {
   const after = await wg.getRelations("ent-macbeth", "act2-scene1");
   assert.ok(!after.some((n: any) => n.label === "located_in"), "闭合后应查不到关系");
 }));
+
+// ============================================================================
+// D2/D3 台账修复（2026-08-07）：birthEntity 公开 API extraFacts 参数
+// ============================================================================
+
+test("D2/D3: birthEntity extraFacts 逐条写 Fact，与 initialProps 合并计数声明 ID", withTempWg(async (wg) => {
+  await wg.birthEntity("e1", "character", { tag: "a" }, "t1", undefined, [
+    { entityId: "e1", property: "tag", value: "b" },
+    { entityId: "e1", property: "tag", value: "c", modality: "belief" },
+  ]);
+  const snap = await wg.getEntityAt("e1", "t1");
+  const tags = snap!.properties.filter((d) => d.property === "tag");
+  assert.equal(tags.length, 3, "initialProps 与 extraFacts 同 property 应全部保留");
+  const ids = tags.map((d) => d.declarationId).sort();
+  assert.deepEqual(ids, ["decl-e1-tag-t1", "decl-e1-tag-t1-2", "decl-e1-tag-t1-3"]);
+  // extraFacts modality 透传（缺省 "fact"）
+  const belief = tags.find((d) => d.value === "c");
+  assert.equal(belief?.modality, "belief");
+  const second = tags.find((d) => d.value === "b");
+  assert.equal(second?.modality, "fact", "extraFacts modality 缺省应为 fact");
+}));
+
+// ============================================================================
+// D4 台账修复（2026-08-07）：killEntity 级联闭合 Relation
+// ============================================================================
+
+test("D4: killEntity 级联闭合死者所有未闭合 Relation", withTempWg(async (wg) => {
+  await wg.birthEntity("ent-a", "character", {}, "t1");
+  await wg.birthEntity("ent-b", "location", {}, "t1");
+  await wg.birthEntity("ent-c", "character", {}, "t1");
+  await wg.addRelation("ent-a", "ent-b", "located_in", "t1");  // a 为 source
+  await wg.addRelation("ent-c", "ent-a", "knows", "t1");       // a 为 target
+  await wg.addRelation("ent-b", "ent-c", "near", "t1");        // 与 a 无关
+  await wg.killEntity("ent-a", "t2");
+  // getRelations 在 t2 查不到死者关系（both source/target 方向）
+  const after = await wg.getRelations("ent-a", "t2");
+  assert.equal(after.length, 0, "死后 Relation 应全部闭合");
+  const before = await wg.getRelations("ent-a", "t1");
+  assert.equal(before.length, 2, "死前 Relation 应可查");
+  // getRelationHistory 能查到已闭合记录
+  const history = await wg.getRelationHistory("ent-a");
+  assert.equal(history.length, 2);
+  assert.ok(history.every((r) => r.validTo === "t2"), "历史中死者 Relation validTo 应为死亡时刻");
+  // 与死者无关的关系不受影响
+  const untouched = await wg.getRelations("ent-b", "t2");
+  assert.ok(untouched.some((r) => r.label === "near"), "无关 Relation 不应被级联闭合");
+}));
+
+// ============================================================================
+// D5 台账修复（2026-08-07）：updateEntitySummary 写事件 + 重嵌入
+// ============================================================================
+
+test("D5: updateEntitySummary 更新生效且产生 change 事件", withTempWg(async (wg) => {
+  await wg.birthEntity("e1", "character", {}, "t1");
+  await wg.updateEntitySummary("e1", "新摘要", "t2");
+  const snap = await wg.getEntityAt("e1", "t2");
+  assert.equal(snap?.summary, "新摘要", "summary 覆盖更新应生效");
+  const events = await wg.getAllEvents();
+  const evt = events.find((e) => e.type === "change" && e.entityId === "e1");
+  assert.ok(evt, "应写一条 change 事件到事件日志（summary 变更可回溯）");
+  assert.equal(evt!.summary, "新摘要", "事件复用 summary 字段");
+  assert.equal(evt!.storyTime, "t2");
+  assert.equal(evt!.source, "engine", "source 默认 engine");
+  assert.equal(evt!.newFacts, undefined, "newFacts 为空");
+  assert.equal(evt!.invalidated, undefined, "invalidated 为空");
+}));
+
+test("D5: updateEntitySummary 配置 embedder 时触发重嵌入", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "wg-test-"));
+  const embedded: string[] = [];
+  const wg = await WorldGraph.create({
+    dbPath: join(dir, "world.db"),
+    eventLogPath: join(dir, "events.jsonl"),
+    embedder: {
+      embedEntity: async (snap) => { embedded.push(snap.entityId); return new Array(512).fill(0); },
+      embedFact: async () => new Array(512).fill(0),
+    },
+  });
+  try {
+    await wg.birthEntity("e1", "character", {}, "t1");
+    await wg.updateEntitySummary("e1", "触发重嵌入", "t2");
+    assert.deepEqual(embedded, ["e1"], "配置 embedder 时应触发该实体的重嵌入");
+  } finally {
+    wg.close();
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+// ============================================================================
+// C3 台账修复（2026-08-07）：幂等写入入口
+// ============================================================================
+
+test("C3: birthEntityUpsert 重复调用不产生重复记录", withTempWg(async (wg) => {
+  await wg.birthEntityUpsert("e1", "character", { name: "甲" }, "t1");
+  // 重复调用：幂等跳过，不抛错
+  await assert.doesNotReject(wg.birthEntityUpsert("e1", "character", { name: "乙" }, "t2"));
+  const snap = await wg.getEntityAt("e1", "t1");
+  assert.equal(snap?.properties.find((d) => d.property === "name")?.value, "甲", "首次写入保留");
+  const { entities } = await wg.getEntityHistory("e1");
+  assert.equal(entities.length, 1, "重复 upsert 不应产生第二条 Entity 记录");
+}));
+
+// ============================================================================
+// C4 台账修复（2026-08-07）：可选引用完整性校验（strict 模式）
+// ============================================================================
+
+test("C4: birthEntity strict=true 时 entityId 已存活抛错", withTempWg(async (wg) => {
+  await wg.birthEntity("e1", "character", {}, "t1");
+  await assert.rejects(
+    wg.birthEntity("e1", "character", {}, "t2", undefined, undefined, { strict: true }),
+    /已存活/,
+    "strict 模式下重复诞生应抛错",
+  );
+  // strict 缺省：保持原行为（不抛错）
+  await assert.doesNotReject(wg.birthEntity("e1", "character", {}, "t2"));
+}));
+
+test("C4: addRelation strict=true 时端点实体不存在抛错", withTempWg(async (wg) => {
+  await wg.birthEntity("e1", "character", {}, "t1");
+  await assert.rejects(
+    wg.addRelation("e1", "e-ghost", "knows", "t1", { strict: true }),
+    /e-ghost/,
+    "strict 模式下端点缺失应抛错",
+  );
+  // strict 缺省：保持原行为（允许孤儿关系）
+  await assert.doesNotReject(wg.addRelation("e1", "e-ghost", "knows", "t1"));
+}));
+
+test("D5: updateEntitySummary 同毫秒重复调用事件 ID 不撞键（复核修复）", withTempWg(async (wg) => {
+  await wg.birthEntity("e1", "character", {}, "t1");
+  // 同 storyTime 连续两次调用（极可能同毫秒），eventId 靠实例级自增序号区分
+  await wg.updateEntitySummary("e1", "摘要一", "t2");
+  await wg.updateEntitySummary("e1", "摘要二", "t2");
+  const evts = (await wg.getAllEvents()).filter(
+    (e) => e.type === "change" && e.entityId === "e1",
+  );
+  assert.equal(evts.length, 2, "两次调用应各产生一条 change 事件");
+  assert.notEqual(evts[0].eventId, evts[1].eventId, "同毫秒调用 eventId 应唯一");
+  // traceCauses 按 eventId 索引，撞键会互相覆盖；此处验证两条都可独立回溯
+  assert.equal((await wg.traceCauses(evts[0].eventId))?.[0].summary, "摘要一");
+  assert.equal((await wg.traceCauses(evts[1].eventId))?.[0].summary, "摘要二");
+}));

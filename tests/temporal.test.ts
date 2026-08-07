@@ -95,7 +95,19 @@ test("双时态角色视角：后补写的历史 Fact 对 recordedAsOf 不可见
   assert.ok(!asWas.some((d) => d.property === "birthplace"), "recordedAsOf 应隔离后补写的 Fact");
 }));
 
-test("processEvent 自动填充 recordedAt（事务时间墙钟）", withTempWg(async (wg) => {
+test("processEvent 自动填充 recordedAt（D8：SDK 事务时钟坐标）", withTempWg(async (wg) => {
+  // D8（2026-08-07）：recordedAt 缺省值从墙钟 ISO 改为 SDK recorded 坐标。
+  // 空图首次写入无坐标，recordedAt 缺省不落
+  await wg.processEvent({
+    eventId: "evt-0",
+    type: "birth",
+    storyTime: "ch000.ev001",
+    entityId: "e0",
+  });
+  const first = await wg.getAllEvents();
+  assert.equal(first[0].recordedAt, undefined, "空图首次写入无 recorded 坐标，recordedAt 不落");
+
+  // 有提交历史后，缺省 recordedAt 为 SDK recorded 坐标格式（非 ISO 墙钟）
   await wg.processEvent({
     eventId: "evt-1",
     type: "birth",
@@ -103,8 +115,11 @@ test("processEvent 自动填充 recordedAt（事务时间墙钟）", withTempWg(
     entityId: "e1",
   });
   const events = await wg.getAllEvents();
-  assert.ok(events[0].recordedAt, "recordedAt 应自动填充");
-  assert.ok(!Number.isNaN(Date.parse(events[0].recordedAt!)), "recordedAt 应为 ISO 时间");
+  const e1 = events.find((e) => e.eventId === "evt-1");
+  assert.ok(e1?.recordedAt, "recordedAt 应自动填充");
+  assert.match(e1!.recordedAt!, /^r1:\d{16}:/, "recordedAt 应为 SDK recorded 坐标（非 ISO）");
+  assert.ok(Number.isNaN(Date.parse(e1!.recordedAt!)), "recordedAt 不应是 ISO 墙钟");
+
   // 显式传入优先
   await wg.processEvent({
     eventId: "evt-2",
@@ -114,7 +129,7 @@ test("processEvent 自动填充 recordedAt（事务时间墙钟）", withTempWg(
     recordedAt: "2026-01-01T00:00:00.000Z",
   });
   const all = await wg.getAllEvents();
-  assert.equal(all[1].recordedAt, "2026-01-01T00:00:00.000Z");
+  assert.equal(all.find((e) => e.eventId === "evt-2")?.recordedAt, "2026-01-01T00:00:00.000Z");
 }));
 
 test("getEntityHistory 附带写入时间（createdAt/updatedAt）", withTempWg(async (wg) => {
@@ -148,4 +163,81 @@ test("双时态关系查询：recordedAsOf 隔离后续闭合", withTempWg(async
   const asWas = await wg.getRelations("e-a", "ch002.ev001", { recordedAsOf: before });
   assert.equal(asWas.length, 1);
   assert.equal(asWas[0].label, "朋友");
+}));
+
+// ============================================================================
+// C2 台账修复（2026-08-07）：history 方法补 recordedAsOf（retcon 隔离）
+// ============================================================================
+
+test("C2: getEntityHistory 带 recordedAsOf 隔离后续写入", withTempWg(async (wg) => {
+  await wg.birthEntity("e1", "character", { mood: "happy" }, "ch001.ev001");
+  const before = await wg.recordedNow();
+  // retcon：闭合 mood=happy，改写为 sad
+  await wg.processEvent({
+    eventId: "evt-1",
+    type: "change",
+    storyTime: "ch002.ev001",
+    entityId: "e1",
+    invalidated: [{ declarationId: "decl-e1-mood-ch001.ev001", property: "mood" }],
+    newFacts: [{ entityId: "e1", property: "mood", value: "sad", modality: "fact" }],
+  });
+  // live：两条 Fact（happy 已闭合 + sad）
+  const live = await wg.getEntityHistory("e1");
+  assert.equal(live.facts.length, 2);
+  assert.equal(
+    live.facts.find((f) => f.declarationId === "decl-e1-mood-ch001.ev001")?.validTo,
+    "ch002.ev001",
+  );
+  // recordedAsOf=before：改写前的历史 —— happy 未闭合，sad 不存在
+  const asWas = await wg.getEntityHistory("e1", { recordedAsOf: before });
+  assert.equal(asWas.facts.length, 1, "recordedAsOf 应隔离后续补写的 Fact");
+  assert.equal(asWas.facts[0].value, "happy");
+  assert.equal(asWas.facts[0].validTo, "Infinity", "recordedAsOf 时点 happy 尚未闭合");
+}));
+
+test("C2: getRelationHistory 带 recordedAsOf 隔离后续闭合", withTempWg(async (wg) => {
+  await wg.birthEntity("e-a", "character", {}, "ch001.ev001");
+  await wg.birthEntity("e-b", "character", {}, "ch001.ev001");
+  await wg.addRelation("e-a", "e-b", "朋友", "ch001.ev002");
+  const before = await wg.recordedNow();
+  await wg.closeRelation("e-a", "e-b", "朋友", "ch002.ev001");
+  // live：关系已闭合
+  const live = await wg.getRelationHistory("e-a");
+  assert.equal(live[0]?.validTo, "ch002.ev001");
+  // recordedAsOf=before：闭合前的时点看，关系未闭合
+  const asWas = await wg.getRelationHistory("e-a", { recordedAsOf: before });
+  assert.equal(asWas.length, 1);
+  assert.equal(asWas[0].validTo, "Infinity", "recordedAsOf 时点关系尚未闭合");
+}));
+
+test("C2: getVisibilityForDeclaration 带 recordedAsOf 隔离后续撤销", withTempWg(async (wg) => {
+  await wg.birthEntity("e1", "character", { name: "甲" }, "ch001.ev001");
+  await wg.setVisibility("e1", "decl-e1-name-ch001.ev001", {
+    state: "known", confidence: 1, source: "experienced", validFrom: "ch001.ev001", isExplicit: true,
+  });
+  const before = await wg.recordedNow();
+  await wg.closeVisibility("e1", "decl-e1-name-ch001.ev001", "ch002.ev001");
+  // live：可见性已撤销
+  const live = await wg.getVisibilityForDeclaration("decl-e1-name-ch001.ev001");
+  assert.equal(live[0]?.validTo, "ch002.ev001");
+  // recordedAsOf=before：撤销前的时点看，可见性未闭合
+  const asWas = await wg.getVisibilityForDeclaration("decl-e1-name-ch001.ev001", undefined, { recordedAsOf: before });
+  assert.equal(asWas.length, 1);
+  assert.equal(asWas[0].validTo, "Infinity", "recordedAsOf 时点可见性尚未撤销");
+}));
+
+test("C2: inferVisibility 带 recordedAsOf 不读取后补写的关系", withTempWg(async (wg) => {
+  await wg.birthEntity("e-lin", "character", {}, "ch001.ev001");
+  await wg.birthEntity("e-room", "location", { temp: "cold" }, "ch001.ev001");
+  const before = await wg.recordedNow();  // 此时还没有 located_in 关系
+  // 后补写关系（validFrom 在过去，但写入了 before 之后）
+  await wg.addRelation("e-lin", "e-room", "located_in", "ch001.ev001");
+  // recordedAsOf=before：关系对该时点不可见 → 不推断任何可见性
+  await wg.inferVisibility("ch001.ev001", { recordedAsOf: before });
+  const none = await wg.getVisibilityForDeclaration("decl-e-room-temp-ch001.ev001");
+  assert.equal(none.length, 0, "recordedAsOf 应隔离后补写的关系，不做推断");
+  // live：正常推断
+  await wg.inferVisibility("ch001.ev001");
+  const some = await wg.getVisibilityForDeclaration("decl-e-room-temp-ch001.ev001");
+  assert.equal(some.length, 1, "live 推断应正常写入可见性");
 }));

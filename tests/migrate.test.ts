@@ -84,3 +84,15 @@ test("migrate: 空库（schema 未初始化）抛错", async () => {
   db.close();
   await assert.rejects(WorldGraph.migrate(o), /无需迁移|未初始化/);
 });
+
+test("migrate: 接受 { dbPath } 单字段（C1 签名对称，2026-08-07）", async () => {
+  const o = opts("d");
+  const wg = await WorldGraph.create(o);
+  wg.close();
+  // C1：migrate 只需 dbPath，与 create 的完整 WorldGraphOptions 两种都可用
+  const r = await WorldGraph.migrate({ dbPath: o.dbPath });
+  assert.equal(r.fromVersion, 1);
+  assert.equal(r.toVersion, 2);
+  const wg2 = await WorldGraph.create(o);
+  wg2.close();
+});

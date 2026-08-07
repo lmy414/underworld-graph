@@ -5,6 +5,55 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.0] - 2026-08-07
+
+### Changed（破坏性，semver 0.x 破例升 minor）
+- **D2/D3 birth 事件 newFacts 语义**：弃用 `Object.fromEntries`（同 property 多条互相
+  覆盖、`entityId` 被忽略、modality 硬编码 `"fact"`），改为逐条写 Fact，透传
+  `entityId`（支持跨实体声明）与 `modality`；同 property 多条全部保留，首条声明 ID
+  保持旧格式 `decl-{entityId}-{property}-{storyTime}`，次条起追加 `-2`/`-3` 后缀。
+- **D4 killEntity 级联闭合 Relation**：死亡实体的所有未闭合 Relation（source/target
+  双向）随 Fact 一同闭合，死者不再出现在关系查询与 inferVisibility 推断中。
+- **D5 updateEntitySummary 签名变更**：`(entityId, summary)` →
+  `(entityId, summary, storyTime)`（storyTime 必填）；每次调用写一条 change 事件到
+  事件日志（summary 变更可回溯），配置 `embedder` 时触发该实体的重嵌入。
+- **D7 traceCauses 返回类型**：`Promise<EventRecord[]>` →
+  `Promise<EventRecord[] | null>`；eventId 不存在返回 `null`，因果链前驱丢失
+  （causedBy 悬空）抛含悬空 eventId 的 Error，不再静默截断。
+- **D8 recordedAt 坐标化**：`processEvent` 缺省 recordedAt 从墙钟 ISO 改为 SDK
+  事务时钟坐标（`recordedNow()`），与双时态查询事务时间轴统一；空图首次写入无坐标
+  不落 recordedAt；旧日志 ISO 行与新坐标行混排为已知不一致，显式传入仍优先。
+
+### Added
+- **D1 storyTimePattern**：`WorldGraphOptions.storyTimePattern?: RegExp`，设置后所有
+  写入入口校验 storyTime 格式（缺省不校验；推荐 narrative-engine 用
+  `/^ch\d{3}\.ev\d{3}$/`）。
+- **C2 四方法 recordedAsOf**：`getEntityHistory` / `getRelationHistory` /
+  `getVisibilityForDeclaration` / `inferVisibility` 支持 `opts.recordedAsOf`，
+  历史查询可做 retcon 隔离。
+- **C3 幂等写入入口**：`birthEntityUpsert`（已存活则跳过）与
+  `setVisibilityIfAbsent`（已有未闭合记录则跳过），供上层重试逻辑使用。
+- **C4 可选严格模式**：`birthEntity` / `addRelation` / `setVisibility` 尾部
+  `{ strict?: boolean }`，`processEvent` 入参 `strict`（parse 前剥离，不落日志）；
+  strict=true 时校验实体存活、关系端点、声明引用完整性，缺省 false 保持原行为。
+- **embedder 选项**：`WorldGraphOptions.embedder`，供 D5 重嵌入使用。
+- **scripts/bench.mjs**：性能基准脚本（N=1000 实体 × 5 Fact）。
+
+### Fixed
+- **B5 全表扫描**：killEntity / closeRelation / getRelations / getVisibilityForCharacter
+  等热点改用 SDK `find({ where })` 谓词 SQL 下推；`getAllEntities` 消除 N+1
+  （Entity/Fact 各取一次内存分组，输出与 getEntityAt 完全一致）。实测
+  （N=1000 × 5 Fact）：getAllEntities 59.5s → 54ms（约 1100×），killEntity 38.6ms，
+  getCharacterView 49.2ms。
+
+### Notes
+- **D6 仍暂缓**：VisibilityNode.state 单值枚举删除会改 schema_hash 触发
+  MIGRATION_ERROR，等下次 schema 大改一并清理。
+- E 类待对齐议题（valueText 输出裁剪不一致 / invalidated[].property 死字段 /
+  Entity.summary 双轨）记录于 DEPLOYMENT.md §9.4，本次未动代码。
+- 验证：`npm run typecheck` / `npm run build` 通过，`npm test` 95/95 全绿，
+  `npm run smoke` 通过（CI Node 20/22 同口径）。
+
 ## [0.1.2] - 2026-08-05
 
 ### Fixed

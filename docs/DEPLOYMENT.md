@@ -1,6 +1,6 @@
 # underworld-graph 部署与源码指南
 
-> 版本：`0.1.2`　·　协议：GPL-3.0-only　·　作者：lmy414　·　npm 包名：`underworld-graph`
+> 版本：`0.2.0`　·　协议：GPL-3.0-only　·　作者：lmy414　·　npm 包名：`underworld-graph`
 >
 > 如果你对这个项目感兴趣，可以看看下面的内容，欢迎提出修改建议，我会认真采纳。
 
@@ -89,7 +89,7 @@ npm --version
 
 | 形态 | 适用场景 | 关键步骤 |
 |---|---|---|
-| **A. 作为依赖集成到你的服务** | 生产推荐 | 你的服务 `package.json` 加 `"underworld-graph": "0.1.2"`，自己的进程管 SQLite 文件路径 |
+| **A. 作为依赖集成到你的服务** | 生产推荐 | 你的服务 `package.json` 加 `"underworld-graph": "0.2.0"`，自己的进程管 SQLite 文件路径 |
 | **B. 从源码克隆自部署** | 调试 / 二次开发 | `git clone` + `npm install` + `npm run build`，再被你的服务以 file: 引用 |
 | **C. 纯 npm 安装验证** | 试用 | `npm install underworld-graph` 后写脚本调用 |
 
@@ -99,7 +99,7 @@ npm --version
 
 ```bash
 cd /opt/your-service
-npm install underworld-graph@0.1.2
+npm install underworld-graph@0.2.0
 # 此时 better-sqlite3 + sqlite-vec 会被自动编译
 ```
 
@@ -137,7 +137,7 @@ sudo chown -R your-service:your-service /var/lib/your-service/world
 # 1. 克隆
 git clone git@github.com:lmy414/underworld-graph.git
 cd underworld-graph
-git checkout v0.1.2   # 或 master
+git checkout v0.2.0   # 或 master
 
 # 2. 装依赖（会编译 better-sqlite3 原生模块）
 npm install
@@ -337,7 +337,7 @@ underworld-graph/
 逐字段：
 
 - `name`: `"underworld-graph"` — npm 包名（无 scope，公开包）。
-- `version`: `"0.1.2"` — 当前发布版本。
+- `version`: `"0.2.0"` — 当前发布版本。
 - `description`: `"Bi-temporal narrative state graph for fiction-writing engines."`
   — 一句话定位。
 - `keywords`: 8 个发现关键词：`narrative / story / graph / bi-temporal / sqlite /
@@ -567,7 +567,9 @@ export const EventRecord = z.object({
 - `newFacts` birth / change 事件用，新声明数组。
 - `causedBy` 指向前驱事件的 `eventId`，组成因果链。
 - `userInput` 用户口述原文（2026-07-25 新增），跨会话项目记忆引用。
-- `recordedAt` 写入墙钟时间（2026-07-25 新增），双时态事务时间轴。
+- `recordedAt` 写入事务时间坐标（0.2.0 起，D8）：缺省为 SDK recorded 坐标
+  （`recordedNow()`，形如 `r1:...`），空图首次写入无坐标不落；0.2.0 之前为墙钟
+  ISO，新旧日志混排为已知不一致。显式传入优先。双时态事务时间轴。
 
 ```typescript
 export type EventRecordInput = z.input<typeof EventRecord>;
@@ -673,7 +675,8 @@ EventRecord。`+ "\n"` 保证每行一个 JSON。
 文件不存在返回空数组。读全文 split 行，过滤空行，逐行 `JSON.parse`。
 
 **已知问题（未修复）**：全文读取 + 全建 Map，日志上规模后内存与时间开销显著。
-流式读取属性能优化项，与 §9.2 的 B5 同批排期。
+流式读取属性能优化项（§9.2 B5 已于 0.2.0 修复节点查询侧的全表扫描，本项为
+EventLog 读取侧的独立遗留项，另行排期）。
 
 ```typescript
   async traceBack(eventId: string): Promise<EventRecord[]> {
@@ -693,6 +696,9 @@ EventRecord。`+ "\n"` 保证每行一个 JSON。
 沿 `causedBy` 字段回溯因果链。`chain.unshift` 保证返回顺序是从最早的祖先到当前事件。
 
 **已知问题**：`causedBy` 指向不存在的事件时静默停止（不区分"无前驱"和"前驱不存在"）。
+0.2.0 起公开入口 `WorldGraph.traceCauses` 已修复该语义（D7：eventId 不存在返回
+`null`，前驱丢失抛错），不再委托本方法；`traceBack` 保留为 EventLog 底层原语，
+行为不变。
 
 ```typescript
   close(): void {
@@ -1106,19 +1112,24 @@ private async findNodes(
 #### 实体生命周期方法（行 345-471）
 
 ```typescript
-async birthEntity(entityId, entityType, initialProps, storyTime, summary?): Promise<void>
+async birthEntity(entityId, entityType, initialProps, storyTime, summary?, extraFacts?, opts?): Promise<void>
+async birthEntityUpsert(...): Promise<void>  // 同 birthEntity 签名，已存活则幂等跳过（0.2.0 C3）
 async killEntity(entityId, storyTime): Promise<void>
 async getEntityAt(entityId, storyTime, opts?): Promise<EntitySnapshot | null>
-async updateEntitySummary(entityId, summary): Promise<void>
+async updateEntitySummary(entityId, summary, storyTime): Promise<void>
 ```
 
-- `birthEntity` — 创建 Entity 节点 + 循环创建 Fact 节点（initialProps 的每个键值对一个 Fact）。
-  `declarationId` 格式 `decl-{entityId}-{prop}-{storyTime}`。
-- `killEntity` — 闭合 Entity 的 `validTo`，级联闭合该实体所有未闭合 Fact。
-  找不到实体或已死时抛错。
+- `birthEntity` — 创建 Entity 节点 + 逐条创建 Fact 节点（initialProps 每个键值对 +
+  extraFacts 每条各一个 Fact，0.2.0 D2/D3）。`declarationId` 格式
+  `decl-{entityId}-{prop}-{storyTime}`，同批同 property 多条时次条起追加 `-2`/`-3`。
+  `opts.strict` 严格模式下实体已存活抛错（0.2.0 C4）。
+- `killEntity` — 闭合 Entity 的 `validTo`，级联闭合该实体所有未闭合 Fact 与
+  Relation（source/target 双向，0.2.0 D4）。找不到实体或已死时抛错。
 - `getEntityAt` — bi-temporal 快照查询。`validFrom <= storyTime < validTo`
   （特判 INFINITY），叠加 `recordedAsOf`（事务时间轴）。
-- `updateEntitySummary` — 直接覆盖当前 Entity 的 summary，不参与时态。
+- `updateEntitySummary` — 覆盖当前 Entity 的 summary（0.2.0 D5：storyTime 必填，
+  先写一条 change 事件到事件日志使变更可回溯，再更新 DB；配置 embedder 时触发
+  该实体的重嵌入，未配置静默跳过）。
 
 #### 关系方法（行 436-504）
 
@@ -1138,10 +1149,11 @@ async processEvent(input: EventRecordInput): Promise<void> {
   return this.withWriteLock(() => this._processEvent(input));
 }
 
-private async _processEvent(input: EventRecordInput): Promise<void> {
+private async _processEvent(input: EventRecordInput & { strict?: boolean }): Promise<void> {
+  const { strict, ...eventInput } = input;  // C4：strict parse 前剥离，不落日志
   const event = EventRecord.parse({
-    recordedAt: new Date().toISOString(),
-    ...input,
+    ...(recordedAt ? { recordedAt } : {}),  // D8：SDK recorded 坐标（0.2.0 起）
+    ...eventInput,
   });
   await this.eventLog.append(event);
 
@@ -1163,34 +1175,42 @@ private async _processEvent(input: EventRecordInput): Promise<void> {
 0.1.1 拆为 `processEvent`（加锁）+ `_processEvent`（实际逻辑）。0.1.2 再拆
 `_applyEvent(tx, event)`：先 append JSONL（审计优先，即使状态回滚日志也保留），
 再 `runInTransaction` 包 SDK `store.transaction(tx)`，事务内所有节点读写走
-`tx.nodes`，中途失败整体回滚，不留半成品。`recordedAt` 缺省填充当前时间，
-调用方显式传入时优先，再按 type 分派。
+`tx.nodes`，中途失败整体回滚，不留半成品。0.2.0 起 `recordedAt` 缺省填充 SDK
+事务时钟坐标（`recordedNow()`，D8；空图首写无坐标不落，旧 ISO 日志混排为已知
+不一致），调用方显式传入时优先，再按 type 分派。0.2.0 起入参支持 `strict`
+（C4，parse 前剥离不落日志）：birth 分支校验实体未存活，change 分支校验
+newFacts 实体存活与 invalidated 引用完整。
 
 **事务约束（0.1.2 实测）**：外层不能用 `db.exec("BEGIN")` 包裹 —— SDK 写入自带
 事务，会报 "cannot start a transaction within a transaction"；事务内穿插 `store`
 直读会触发 SDK deadlock 报错，必须统一走 `tx` 上下文。`birthEntity` / `killEntity`
 重构为 core 方法 + 双路由（普通调用走 `store.nodes`，事务内复用 `tx.nodes`）。
 
-**birth 分支的已知问题**：`Object.fromEntries((event.newFacts ?? []).map((f) => [f.property, f.value]))`
+**birth 分支的已知问题（✅ 0.2.0 已修，D2/D3）**：原 `Object.fromEntries((event.newFacts ?? []).map((f) => [f.property, f.value]))`
 同 property 多条 newFacts 互相覆盖只留最后一条；newFacts.entityId 被完全忽略，
-跨实体 newFacts 静默丢失。这是 D 类需对齐的修复。
+跨实体 newFacts 静默丢失。0.2.0 改为 newFacts 逐条映射为 extraFacts 传给
+`birthEntityCore`，entityId/modality 透传，同 property 多条全部保留
+（声明 ID 首条旧格式、次条起追加 `-2`/`-3`）。
 
 #### 事件查询方法（行 568-576）
 
 ```typescript
-async traceCauses(eventId): Promise<EventRecord[]>
+async traceCauses(eventId): Promise<EventRecord[] | null>
 async getAllEvents(): Promise<EventRecord[]>
 ```
 
-`traceCauses` 委托给 `eventLog.traceBack`。`getAllEvents` 按 `storyTime` 升序。
+`traceCauses` 沿 `causedBy` 回溯因果链（0.2.0 D7：eventId 不存在返回 `null`；
+链上 causedBy 悬空抛含悬空 eventId 的 Error；不再委托 `eventLog.traceBack`）。
+`getAllEvents` 按 `storyTime` 升序。
 
 #### 可见性方法（行 578-662）
 
 ```typescript
-async setVisibility(characterId, declarationId, opts): Promise<void>
+async setVisibility(characterId, declarationId, visOpts, strictOpts?): Promise<void>
+async setVisibilityIfAbsent(...): Promise<void>  // 同 setVisibility 签名，已有未闭合则跳过（0.2.0 C3）
 async getVisibilityForCharacter(characterId, storyTime, opts?): Promise<VisibilityDeclaration[]>
 async closeVisibility(characterId, declarationId, storyTime): Promise<void>
-async getVisibilityForDeclaration(declarationId, storyTime?): Promise<VisibilityDeclaration[]>
+async getVisibilityForDeclaration(declarationId, storyTime?, opts?): Promise<VisibilityDeclaration[]>
 ```
 
 `setVisibility` 的 `visibilityId` 格式 `vis-{characterId}-{declarationId}-{validFrom}`。
@@ -1320,20 +1340,21 @@ on:
 
 | 方法 | 签名 | 说明 |
 |---|---|---|
-| `WorldGraph.create` | `(opts: WorldGraphOptions) => Promise<WorldGraph>` | 异步工厂，初始化 SQLite + sqlite-vec + TypeGraph |
-| `WorldGraph.migrate` | `(opts: WorldGraphOptions) => Promise<MigrateResult>` | schema 版本迁移 |
+| `WorldGraph.create` | `(opts: WorldGraphOptions) => Promise<WorldGraph>` | 异步工厂，初始化 SQLite + sqlite-vec + TypeGraph（0.2.0 起 opts 支持 storyTimePattern / embedder） |
+| `WorldGraph.migrate` | `(opts: WorldGraphOptions \| { dbPath: string }) => Promise<MigrateResult>` | schema 版本迁移（0.2.0 起两种入参都可用，C1） |
 | `wg.close` | `() => void` | 释放 db 句柄（含 EventLog.close） |
 
 ### 实体
 
 | 方法 | 说明 |
 |---|---|
-| `birthEntity(entityId, type, initialProps, storyTime, summary?)` | 诞生实体 + 初始属性 |
-| `killEntity(entityId, storyTime)` | 消亡实体，级联闭合 Fact |
+| `birthEntity(entityId, type, initialProps, storyTime, summary?, extraFacts?, opts?)` | 诞生实体 + 初始属性（0.2.0 起支持 extraFacts 与 strict） |
+| `birthEntityUpsert(...)` | 幂等诞生（0.2.0 C3，已存活则跳过） |
+| `killEntity(entityId, storyTime)` | 消亡实体，级联闭合 Fact + Relation（0.2.0 D4） |
 | `getEntityAt(entityId, storyTime, opts?)` | bi-temporal 快照 |
 | `getAllEntities(storyTime, opts?)` | 全部有效实体 |
-| `getEntityHistory(entityId)` | 全部版本（含已闭合） |
-| `updateEntitySummary(entityId, summary)` | 直接覆盖 summary |
+| `getEntityHistory(entityId, opts?)` | 全部版本（含已闭合；0.2.0 起支持 recordedAsOf） |
+| `updateEntitySummary(entityId, summary, storyTime)` | 覆盖 summary + 写 change 事件（0.2.0 D5） |
 
 ### 关系
 
@@ -1342,25 +1363,26 @@ on:
 | `addRelation(sourceId, targetId, label, storyTime)` | 创建关系 |
 | `closeRelation(sourceId, targetId, label, storyTime)` | 闭合关系 |
 | `getRelations(entityId, storyTime, opts?)` | bi-temporal 关系查询 |
-| `getRelationHistory(entityId?)` | 全部关系（含已闭合） |
+| `getRelationHistory(entityId?, opts?)` | 全部关系（含已闭合；0.2.0 起支持 recordedAsOf） |
 
 ### 事件
 
 | 方法 | 说明 |
 |---|---|
-| `processEvent(input)` | 追加事件 + 应用副作用（birth/death/change） |
-| `traceCauses(eventId)` | 沿 causedBy 回溯因果链 |
+| `processEvent(input)` | 追加事件 + 应用副作用（birth/death/change；input.strict 严格校验，0.2.0 C4） |
+| `traceCauses(eventId)` | 沿 causedBy 回溯因果链（0.2.0 D7：不存在返回 null，前驱丢失抛错） |
 | `getAllEvents()` | 全部事件（按 storyTime 升序） |
 
 ### 可见性
 
 | 方法 | 说明 |
 |---|---|
-| `setVisibility(characterId, declarationId, opts)` | 显式声明角色知道某声明 |
+| `setVisibility(characterId, declarationId, visOpts, strictOpts?)` | 显式声明角色知道某声明（0.2.0 起支持 strict） |
+| `setVisibilityIfAbsent(...)` | 幂等可见性写入（0.2.0 C3，已有未闭合则跳过） |
 | `closeVisibility(characterId, declarationId, storyTime)` | 撤销可见性 |
 | `getVisibilityForCharacter(characterId, storyTime, opts?)` | 角色可见的声明 |
-| `getVisibilityForDeclaration(declarationId, storyTime?)` | 声明被哪些角色可见 |
-| `inferVisibility(storyTime)` | 从 located_in 自动推断 |
+| `getVisibilityForDeclaration(declarationId, storyTime?, opts?)` | 声明被哪些角色可见（0.2.0 起支持 recordedAsOf） |
+| `inferVisibility(storyTime, opts?)` | 从 located_in 自动推断（0.2.0 起支持 recordedAsOf） |
 | `getCharacterView(characterId, storyTime, opts?)` | 角色视角（五步过滤） |
 
 ### 声明
@@ -1459,8 +1481,9 @@ import type {
 
 - **故事时间轴**（story time）：`validFrom` / `validTo`，故事世界内的时间。
   `"Infinity"` 表示未闭合。
-- **事务时间轴**（transaction time）：`recordedAt`（事件日志）和 SDK recorded
-  instant（节点元信息），墙钟时间，记录"何时写入"。
+- **事务时间轴**（transaction time）：`recordedAt`（事件日志，0.2.0 起缺省为
+  SDK recorded 坐标；此前为墙钟 ISO，混排为已知不一致）和 SDK recorded
+  instant（节点元信息），记录"何时写入"。
 
 `getEntityAt` 等 bi-temporal 查询：`validFrom <= storyTime < validTo`（特判 INFINITY）
 叠加 `opts.recordedAsOf`（只含该时点之前写入的内容，retcon 隔离）。
@@ -1560,7 +1583,10 @@ sudo systemctl restart your-service
 > 修复方案、风险等级、当前状态。
 >
 > 来源：[`docs/design-review-2026-08-02.md`](./design-review-2026-08-02.md) 的 14 项设计评审
-> + 0.1.1 开发期新发现的 10 项，共 24 项。
+> + 0.1.1 开发期新发现的 10 项，共 24 项（另附 3 项 E 类待对齐议题，见 §9.4 表末）。
+>
+> 修复进度：A 类 7 项 0.1.1 已修；B 类 5 项（B1-B4 于 0.1.2、B5 于 0.2.0）已修；
+> C 类 4 项 0.2.0 已修；D 类 8 项中 D1-D5/D7/D8 共 7 项 0.2.0 已修，D6 仍暂缓。
 >
 > **风险分级定义**：
 > - **A 类**：纯内部清理，零下游影响，可直接修。
@@ -1582,10 +1608,10 @@ sudo systemctl restart your-service
 | A6 | typegraph 版本 `^0.40.0` 未锁 minor | minor 升级可能引入不兼容 | `package.json` 改 `~0.40.0`（锁 minor 允许 patch） | ✅ 0.1.1 已修 |
 | A7 | [declaresEdge](file:///d:/claude/pi-ex/underworld-graph/src/world-graph.ts) 定义但从不使用 | 后人误以为是 dead code 删除，触发 schema_hash 变化 | 补注释说明"预留未用，删除会触发 MIGRATION_ERROR"，**不删除** | ✅ 0.1.1 已修 |
 
-### 9.2 B 类：已修复（0.1.2，4 项）+ 待修复（1 项）
+### 9.2 B 类：已修复（0.1.2 四项 + 0.2.0 一项，共 5 项）
 
-> API 不变，行为更合理，零下游影响。B1-B4 已在 0.1.2 修复，每项均配套回归测试；
-> B5（性能）仍待修，先做基准测试确认量级收益。
+> API 不变，行为更合理，零下游影响。B1-B4 已在 0.1.2 修复，B5 已在 0.2.0 修复，
+> 每项均配套回归测试。
 
 | # | 问题 | 影响 | 修复方案 | 风险点 | 状态 |
 |---|---|---|---|---|---|
@@ -1593,34 +1619,46 @@ sudo systemctl restart your-service
 | B2 | [EventLog 单行损坏全文件读不出](file:///d:/claude/pi-ex/underworld-graph/src/event-log.ts) — `readAll` 任意一行 `JSON.parse` 失败会抛错 | 日志文件局部损坏导致整个 `traceBack` / `getAllEvents` 不可用 | `readAll` 逐行 try/catch + `EventRecord.safeParse`，语法损坏与形状不符行跳过（记 stderr） | 消费方不太可能依赖"抛错"语义 | ✅ 0.1.2 已修 |
 | B3 | [inferVisibility 无幂等](file:///d:/claude/pi-ex/underworld-graph/src/character-view.ts) — 重复调用同 storyTime 产生重复 visibility 记录 | 同一 (characterId, declarationId) 多条 visibility 记录，查询结果重复 | 写入前全历史判定（含已闭合）：当前可见跳过；存在 `validTo <= storyTime` 撤销记录则 validFrom 取当前时刻 | 消费方不太可能依赖"重复调用产生重复记录" | ✅ 0.1.2 已修 |
 | B4 | [birthEntity / processEvent.change 无事务回滚](file:///d:/claude/pi-ex/underworld-graph/src/world-graph.ts) — 多步写中途失败留下半成品 | Entity 已建但 Fact 没建全，或旧声明已闭合但新声明没写入，状态不一致 | 多步写包 SDK `store.transaction(tx)`（SDK 自带事务，外层 raw BEGIN 会冲突），事务内读写走 `tx.nodes`，失败整体回滚 | 日志语义已定：JSONL 先写保留审计，状态回滚；未加 `_failed` 标记 | ✅ 0.1.2 已修 |
-| B5 | [killEntity / closeRelation 全表扫描](file:///d:/claude/pi-ex/underworld-graph/src/world-graph.ts) 等 6 处 — 用 `find()` 取全量再 JS filter | 数据量大后查询慢（O(n) 扫描） | 用 SDK `query()` 按 entityId 索引替代 find() + JS filter | 需先做基准测试确认量级收益 | 待修 |
+| B5 | [killEntity / closeRelation 全表扫描](file:///d:/claude/pi-ex/underworld-graph/src/world-graph.ts) 等 6 处 — 用 `find()` 取全量再 JS filter | 数据量大后查询慢（O(n) 扫描） | 用 SDK `find({ where })` 谓词 SQL 下推替代全表扫描（JS 过滤保留兜底）；`getAllEntities` 消除 N+1（两表各取一次内存分组） | 实测（N=1000 × 5 Fact，`scripts/bench.mjs`）：getAllEntities 59.5s → 54ms（约 1100×），killEntity 38.6ms，getCharacterView 49.2ms | ✅ 0.2.0 已修 |
 
-### 9.3 C 类：待修复 — 向后兼容的 API 扩展（4 项）
+### 9.3 C 类：已修复（0.2.0，4 项）— 向后兼容的 API 扩展
 
-> 新增可选参数/方法，原行为不变。可立即修，给消费方提供可选的严格模式 / upsert 入口。
+> 新增可选参数/方法，原行为不变。C1-C4 已在 0.2.0 全部修复，每项配套测试。
 
-| # | 问题 | 影响 | 修复方案 | 风险点 |
-|---|---|---|---|---|
-| C1 | [migrate 接口签名不一致](file:///d:/claude/pi-ex/underworld-graph/src/world-graph.ts) — `migrate` 只接受 `{ dbPath }`，不接受 `WorldGraphOptions` | 调用方需为 migrate 单独构造参数，与 create 不对称 | migrate 改为接受 `WorldGraphOptions \| { dbPath: string }`，两种都兼容 | 向后兼容 |
-| C2 | [getEntityHistory 等不支持 recordedAsOf](file:///d:/claude/pi-ex/underworld-graph/src/world-graph.ts) — 4 个 history 方法无法做 retcon 隔离查询 | 无法查"某事务时点前的历史快照" | 4 个方法加可选 `opts?: TemporalQueryOpts`，内部走 findNodes | 向后兼容 |
-| C3 | [写入无幂等](file:///d:/claude/pi-ex/underworld-graph/src/world-graph.ts) — birthEntity / setVisibility 重复调用产生重复记录 | 上层重试逻辑会导致数据膨胀 | 新增 `birthEntityUpsert` / `setVisibilityIfAbsent` 等可选方法，原方法不动 | 向后兼容 |
-| C4 | [无引用完整性校验](file:///d:/claude/pi-ex/underworld-graph/src/world-graph.ts) — 写 Fact 时不校验 entityId 是否存在 | 可以为不存在的实体写声明，查询时孤儿声明 | 写入方法加可选 `{ strict?: boolean }` 参数，默认 false 保持原行为 | 向后兼容 |
+| # | 问题 | 影响 | 修复方案 | 风险点 | 状态 |
+|---|---|---|---|---|---|
+| C1 | [migrate 接口签名不一致](file:///d:/claude/pi-ex/underworld-graph/src/world-graph.ts) — `migrate` 只接受 `{ dbPath }`，不接受 `WorldGraphOptions` | 调用方需为 migrate 单独构造参数，与 create 不对称 | migrate 改为接受 `WorldGraphOptions \| { dbPath: string }`，两种都兼容 | 向后兼容 | ✅ 0.2.0 已修 |
+| C2 | [getEntityHistory 等不支持 recordedAsOf](file:///d:/claude/pi-ex/underworld-graph/src/world-graph.ts) — 4 个 history 方法无法做 retcon 隔离查询 | 无法查"某事务时点前的历史快照" | 4 个方法（getEntityHistory / getRelationHistory / getVisibilityForDeclaration / inferVisibility）加可选 `opts?: TemporalQueryOpts`，内部走 findNodes | 向后兼容 | ✅ 0.2.0 已修 |
+| C3 | [写入无幂等](file:///d:/claude/pi-ex/underworld-graph/src/world-graph.ts) — birthEntity / setVisibility 重复调用产生重复记录 | 上层重试逻辑会导致数据膨胀 | 新增 `birthEntityUpsert` / `setVisibilityIfAbsent` 幂等入口（已有未闭合记录则跳过），原方法不动 | 向后兼容 | ✅ 0.2.0 已修 |
+| C4 | [无引用完整性校验](file:///d:/claude/pi-ex/underworld-graph/src/world-graph.ts) — 写 Fact 时不校验 entityId 是否存在 | 可以为不存在的实体写声明，查询时孤儿声明 | birthEntity / addRelation / setVisibility 尾部加 `{ strict?: boolean }`，processEvent 入参加 `strict`（parse 前剥离不落日志）：校验实体存活、关系端点、change 的 newFacts 与 invalidated 引用；默认 false 保持原行为 | 向后兼容 | ✅ 0.2.0 已修 |
 
-### 9.4 D 类：待修复 — 需消费方对齐的破坏性修复（8 项）
+### 9.4 D 类：已修复 7 项（0.2.0）+ 暂缓 1 项 — 需消费方对齐的破坏性修复
 
-> 改了会触发 MIGRATION_ERROR、改变 SQLite schema、改变公开输出字段、或改变现有调用语义，
-> **必须先与 narrative-engine / novel 消费方对齐**。
+> 改了会触发 MIGRATION_ERROR、改变 SQLite schema、改变公开输出字段、或改变现有调用语义。
+> D1-D5 / D7 / D8 已与消费方对齐并于 0.2.0 修复（破坏性变更随 0.2.0 发布，semver 0.x
+> 破例升 minor）；D6 仍暂缓。
 
-| # | 问题 | 影响 | 修复方案 | 对齐难点 |
-|---|---|---|---|---|
-| D1 | storyTime 格式无校验（P1-4） — 任意字符串都接受，依赖字典序比较 | 调用方传入不可比较的格式（如 `2026/8/3`）会让时态过滤错乱 | 加 zod regex 校验，约定格式（如 `act\d+-scene\d+` 或 ISO 日期） | 改接受格式会让消费方现有数据失效 |
-| D2 | birth 事件 newFacts 语义缺陷 — `Object.fromEntries` 同 property 多条互相覆盖；newFacts.entityId 被忽略 | 同一 birth 事件无法给同实体多值属性；跨实体 newFacts 静默丢失 | birthEntity 改为遍历 newFacts 逐条写 Fact，保留 entityId 字段 | 改变 birthEntity 行为，消费方现有调用结果不同 |
-| D3 | birth 事件保留 modality（评审 P2-8） — 当前硬编码 `"fact"` | birth 的 newFacts.modality 字段被忽略，所有诞生声明都是 fact | birthEntity 透传 newFacts.modality | 改变 birth 声明的 modality 分布，characterView 的 modalityFilter 结果变化 |
-| D4 | killEntity 级联关 Relation（评审 P2-8 + 新发现） — 死亡实体的 located_in 关系不自动闭合 | 死亡实体仍出现在关系查询，inferVisibility 仍为死者推断可见性 | killEntity 级联闭合该实体的所有未闭合 Relation | 死亡实体从关系查询消失，inferVisibility 不再推死者声明 |
-| D5 | updateEntitySummary 写事件 + 触发重嵌入（评审 P2-8） — 当前直接覆盖，无事件日志 | summary 变更不可回溯，向量不更新 | 改为写 change 事件 + 触发 updateEntityEmbedding | 新增事件日志行，getAllEvents 结果变化 |
-| D6 | VisibilityNode.state 单值枚举 — 当前只有 `"known"`，字段冗余 | schema 占用但无实际语义 | 删字段会改 schema_hash → MIGRATION_ERROR | 暂保留，等下次 schema 大改时一并清理 |
-| D7 | traceCauses 不存在 eventId 语义 — `causedBy` 指向不存在事件时返回 `[]`，与"无前驱"不可区分 | 调用方无法区分"事件是根因"和"前驱丢失" | 区分：无 causedBy 返回 `[event]`；causedBy 不存在抛错或返回 `null` | 消费方分支逻辑会变 |
-| D8 | 事务时间两套钟统一（评审 P3-11） — EventLog.recordedAt 与 SDK recorded instant 不一致 | 双时态查询的事务时间坐标不统一 | 统一为 SDK recorded instant，EventLog.recordedAt 改为引用之 | recordedAt 字段语义变化，旧日志不一致 |
+| # | 问题 | 影响 | 修复方案 | 对齐难点 | 状态 |
+|---|---|---|---|---|---|
+| D1 | storyTime 格式无校验（P1-4） — 任意字符串都接受，依赖字典序比较 | 调用方传入不可比较的格式（如 `2026/8/3`）会让时态过滤错乱 | 0.2.0 落地为可选 `WorldGraphOptions.storyTimePattern?: RegExp`（设置后所有写入入口校验，缺省不校验；推荐 narrative-engine 用 `/^ch\d{3}\.ev\d{3}$/`） | 改为可选项规避了"现有数据失效"风险 | ✅ 0.2.0 已修 |
+| D2 | birth 事件 newFacts 语义缺陷 — `Object.fromEntries` 同 property 多条互相覆盖；newFacts.entityId 被忽略 | 同一 birth 事件无法给同实体多值属性；跨实体 newFacts 静默丢失 | birthEntity 改为 newFacts 逐条写 Fact（extraFacts），保留 entityId；声明 ID 首条旧格式、次条起 `-2`/`-3` | 改变 birthEntity 行为，消费方现有调用结果不同 | ✅ 0.2.0 已修 |
+| D3 | birth 事件保留 modality（评审 P2-8） — 当前硬编码 `"fact"` | birth 的 newFacts.modality 字段被忽略，所有诞生声明都是 fact | birthEntity 透传 newFacts.modality（缺省 "fact"） | 改变 birth 声明的 modality 分布，characterView 的 modalityFilter 结果变化 | ✅ 0.2.0 已修 |
+| D4 | killEntity 级联关 Relation（评审 P2-8 + 新发现） — 死亡实体的 located_in 关系不自动闭合 | 死亡实体仍出现在关系查询，inferVisibility 仍为死者推断可见性 | killEntity 级联闭合该实体的所有未闭合 Relation（source/target 双向） | 死亡实体从关系查询消失，inferVisibility 不再推死者声明 | ✅ 0.2.0 已修 |
+| D5 | updateEntitySummary 写事件 + 触发重嵌入（评审 P2-8） — 当前直接覆盖，无事件日志 | summary 变更不可回溯，向量不更新 | 签名改三参 `(entityId, summary, storyTime)`；先写 change 事件（复用 summary 字段）后更新 DB；配置 embedder 时触发 updateEntityEmbedding | 新增事件日志行，getAllEvents 结果变化 | ✅ 0.2.0 已修 |
+| D6 | VisibilityNode.state 单值枚举 — 当前只有 `"known"`，字段冗余 | schema 占用但无实际语义 | 删字段会改 schema_hash → MIGRATION_ERROR | 暂保留，等下次 schema 大改时一并清理 | 暂缓 |
+| D7 | traceCauses 不存在 eventId 语义 — `causedBy` 指向不存在事件时返回 `[]`，与"无前驱"不可区分 | 调用方无法区分"事件是根因"和"前驱丢失" | 0.2.0 落地：eventId 不存在返回 `null`；链上 causedBy 悬空抛含悬空 eventId 的 Error；不再委托 EventLog.traceBack | 消费方分支逻辑会变 | ✅ 0.2.0 已修 |
+| D8 | 事务时间两套钟统一（评审 P3-11） — EventLog.recordedAt 与 SDK recorded instant 不一致 | 双时态查询的事务时间坐标不统一 | 0.2.0 落地：recordedAt 缺省为 SDK recorded 坐标（recordedNow()）；空图首写无坐标不落；显式传入优先 | recordedAt 字段语义变化，旧日志（ISO）与新日志（坐标）混排为已知不一致 | ✅ 0.2.0 已修 |
+
+### 9.4.1 E 类：待对齐议题（3 项，2026-08-07 登记）
+
+> 设计评审遗留的消费方对齐议题，非缺陷、本次不修代码；与 narrative-engine / novel
+> 消费方对齐后另行排期。
+
+| # | 问题 | 影响 | 建议方向 | 对齐难点 | 状态 |
+|---|---|---|---|---|---|
+| E1 | valueText 输出裁剪不一致（评审 P2-8 遗留） — `getEntityHistory` 的 facts 含 `valueText`，`getEntityAt` / `getAllDeclarations*` 不含 | 同类声明在不同查询路径输出字段不同，消费方难以依赖统一形状 | 统一公开输出的声明字段集（建议公开路径均不含 valueText，或全部含），valueText 定位为内部检索字段 | 改公开输出字段属破坏性变更，需消费方确认无人依赖 | 待对齐 |
+| E2 | `invalidated[].property` 死字段 — change 事件闭合旧声明只按 declarationId 匹配，property 字段从不被读取 | 误导调用方以为 property 参与匹配；schema 冗余 | 从 zod schema 移除或标注 deprecated；保留期间文档注明"仅展示用途" | 改 EventRecord schema 影响日志形状校验与消费方构造代码 | 待对齐 |
+| E3 | Entity.summary 与 Fact `property="summary"` 双轨 — 实体摘要既可落在 Entity.summary 字段，也可作为普通 Fact property | 两条写入路径语义重叠，检索/展示口径可能不一致 | 明确唯一权威路径（建议 Entity.summary 为唯一权威，Fact 禁写 property="summary"），strict 模式可加校验 | 存量数据可能两种都有，需消费方盘点 | 待对齐 |
 
 ### 9.5 监控建议
 
@@ -1675,9 +1713,9 @@ try {
   const view = await wg.getCharacterView("ent-macbeth", "act1-scene4", { modalityFilter: ["fact"] });
   console.log("Macbeth 视角可见声明数:", view.length);
 
-  // 7. 回溯因果链
+  // 7. 回溯因果链（0.2.0 起返回 EventRecord[] | null：事件不存在为 null，前驱丢失抛错）
   const chain = await wg.traceCauses("evt-1");
-  console.log("因果链长度:", chain.length);
+  console.log("因果链长度:", chain?.length ?? "事件不存在");
 
   // 8. 双时态查询（retcon 隔离）
   const recordedNow = await wg.recordedNow();
@@ -1717,7 +1755,7 @@ try {
 发布新版本时：
 
 - [ ] 跑 `npm run typecheck`
-- [ ] 跑 `npm test`（66 用例全绿）
+- [ ] 跑 `npm test`（95 用例全绿）
 - [ ] 跑 `npm run smoke`（端到端冒烟通过）
 - [ ] 更新 `CHANGELOG.md`
 - [ ] bump `package.json` version
@@ -1728,8 +1766,8 @@ try {
 
 ---
 
-**文档版本**：对应 `underworld-graph@0.1.2`，2026-08-05 更新。
-**源码版本**：commit `e74d2c8`（master HEAD）。
+**文档版本**：对应 `underworld-graph@0.2.0`，2026-08-07 更新。
+**源码版本**：commit `bf4b01a`（master HEAD）。
 **问题反馈**：[GitHub Issues](https://github.com/lmy414/underworld-graph/issues)。
 
 ---

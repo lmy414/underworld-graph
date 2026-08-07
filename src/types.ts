@@ -62,9 +62,11 @@ export const EventRecord = z.object({
   entityId: z.string(),
   source: EventSource.default("engine"),
   entityType: EntityType.optional(),  // birth 事件用：指定实体类型，默认 character
-  summary: z.string().optional(),     // birth 事件用：实体无状态客观事实描述（独立数据字段）
+  summary: z.string().optional(),     // birth 事件填实体无状态客观描述；updateEntitySummary 的 summary 变更事件（0.2.0 起）复用此字段
   invalidated: z.array(z.object({
     declarationId: z.string(),
+    // 0.2.0 前为死字段（闭合只按 declarationId 查找）；0.2.0 起在
+    // processEvent strict 模式下用于与声明实际 property 的一致性校验
     property: z.string(),
   })).optional(),
   newFacts: z.array(z.object({
@@ -82,9 +84,11 @@ export const EventRecord = z.object({
    */
   userInput: z.string().optional(),
   /**
-   * 写入墙钟时间（2026-07-25 新增，双时态检索的事务时间轴）
-   * processEvent 自动填充（new Date().toISOString()），调用方可显式覆盖。
-   * 旧事件日志行无此字段，故为可选。
+   * 事务时间坐标（2026-07-25 新增，双时态检索的事务时间轴）。
+   * 0.2.0 起（D8）：processEvent 缺省填充 SDK recorded 时钟坐标（recordedNow()，
+   * 形如 "r1:0000000000000007:..."），取本事件提交前的最近提交点；空图首次写入
+   * 无坐标则不落此字段。0.1.x 旧日志行为 ISO 墙钟（new Date().toISOString()），
+   * 新旧日志混排为已知不一致。调用方显式传入时优先。
    */
   recordedAt: z.string().optional(),
 });

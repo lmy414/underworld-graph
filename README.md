@@ -14,7 +14,7 @@ now an independent package consumable by any narrative tool, visualizer, or impo
 
 - **Bi-temporal model**: every state declaration carries `validFrom`/`validTo`
   (story time) and `recordedAt` (transaction time, via SDK recorded instant)
-- **Entity lifecycle**: birth / death with cascading fact closure
+- **Entity lifecycle**: birth / death with cascading fact + relation closure
 - **Visibility tracking**: per-character knowledge with explicit / inferred sources
 - **Event causality**: append-only JSONL event log with `causedBy` chain tracing
 - **Full-text + vector search**: via `@nicia-ai/typegraph` + `sqlite-vec`
@@ -65,40 +65,49 @@ wg.close();
 ### Factory
 
 - `WorldGraph.create(opts): Promise<WorldGraph>` — async factory; initializes
-  SQLite + sqlite-vec + TypeGraph store.
+  SQLite + sqlite-vec + TypeGraph store. `opts.storyTimePattern?: RegExp` 可启用
+  storyTime 格式校验（推荐 `/^ch\d{3}\.ev\d{3}$/`）；`opts.embedder` 供
+  updateEntitySummary 重嵌入。
 - `WorldGraph.migrate(opts): Promise<MigrateResult>` — migrate TypeGraph schema
-  version (e.g. after graph definition changes); real legacy data migration
-  is handled by the consumer's importer.
+  version (e.g. after graph definition changes); accepts `WorldGraphOptions` or
+  `{ dbPath }`; real legacy data migration is handled by the consumer's importer.
 
 ### Entity lifecycle
 
-- `birthEntity(entityId, type, initialProps, storyTime, summary?)`
-- `killEntity(entityId, storyTime)` — cascades to close open facts
+- `birthEntity(entityId, type, initialProps, storyTime, summary?, extraFacts?, opts?)`
+  — `extraFacts` 逐条写 Fact（透传 entityId/modality，同 property 多条保留）；
+  `opts.strict` 严格模式下实体已存活抛错
+- `birthEntityUpsert(...)` — 同 birthEntity 签名；实体已存活则幂等跳过
+- `killEntity(entityId, storyTime)` — cascades to close open facts and relations
 - `getEntityAt(entityId, storyTime, opts?)` — bi-temporal snapshot
 - `getAllEntities(storyTime, opts?)`
-- `getEntityHistory(entityId)` — all versions incl. closed
-- `updateEntitySummary(entityId, summary)`
+- `getEntityHistory(entityId, opts?)` — all versions incl. closed
+- `updateEntitySummary(entityId, summary, storyTime)` — 覆盖 summary + 写 change
+  事件（可回溯）；配置 `embedder` 时触发重嵌入
 
 ### Relations
 
-- `addRelation(sourceId, targetId, label, storyTime)`
+- `addRelation(sourceId, targetId, label, storyTime, opts?)` — `opts.strict` 校验两端实体存活
 - `closeRelation(sourceId, targetId, label, storyTime)`
 - `getRelations(entityId, storyTime, opts?)`
-- `getRelationHistory(entityId?)`
+- `getRelationHistory(entityId?, opts?)`
 
 ### Events
 
-- `processEvent(input)` — append event + apply side effects (birth / death / change)
-- `traceCauses(eventId)` — walk `causedBy` chain backwards
+- `processEvent(input)` — append event + apply side effects (birth / death / change)；
+  `input.strict` 严格模式校验引用完整性（不落日志）
+- `traceCauses(eventId): Promise<EventRecord[] | null>` — walk `causedBy` chain
+  backwards；eventId 不存在返回 `null`，前驱丢失抛错
 - `getAllEvents()`
 
 ### Visibility
 
-- `setVisibility(characterId, declarationId, opts)`
+- `setVisibility(characterId, declarationId, visOpts, strictOpts?)`
+- `setVisibilityIfAbsent(...)` — 同 setVisibility 签名；已有未闭合记录则幂等跳过
 - `closeVisibility(characterId, declarationId, storyTime)`
 - `getVisibilityForCharacter(characterId, storyTime, opts?)`
-- `getVisibilityForDeclaration(declarationId, storyTime?)`
-- `inferVisibility(storyTime)` — auto-derive from `located_in` relations
+- `getVisibilityForDeclaration(declarationId, storyTime?, opts?)`
+- `inferVisibility(storyTime, opts?)` — auto-derive from `located_in` relations
 - `getCharacterView(characterId, storyTime, opts?)` — declarations visible to a character
 
 ### Declarations

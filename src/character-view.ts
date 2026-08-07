@@ -1,4 +1,4 @@
-import type { WorldGraph } from "./world-graph.js";
+import type { WorldGraph, TemporalQueryOpts } from "./world-graph.js";
 import type { VisibilityDeclaration, StateDeclaration, Modality } from "./types.js";
 import { INFINITY } from "./types.js";
 
@@ -47,12 +47,19 @@ export async function characterView(
  * 遍历 storyTime 时刻所有 located_in 关系
  * 对每条关系，把 target 实体的所有有效声明标记为 source 角色可见
  * validFrom 取角色进入时间和声明时间中较晚者
+ *
+ * C2（2026-08-07）：支持 opts.recordedAsOf —— 读取侧（关系/声明/可见性历史）
+ * 重建到该事务时点（retcon 隔离）；写入侧（setVisibility）仍是 live 写入。
  */
-export async function inferVisibility(wg: WorldGraph, storyTime: string): Promise<void> {
-  const allRels = await wg.getAllRelationsAt(storyTime);
+export async function inferVisibility(
+  wg: WorldGraph,
+  storyTime: string,
+  opts?: TemporalQueryOpts,
+): Promise<void> {
+  const allRels = await wg.getAllRelationsAt(storyTime, opts);
   const locatedIn = allRels.filter((r) => r.label === "located_in");
   for (const rel of locatedIn) {
-    const targetDecls = await wg.getEntityAt(rel.targetId, storyTime);
+    const targetDecls = await wg.getEntityAt(rel.targetId, storyTime, opts);
     if (!targetDecls) continue;
     for (const decl of targetDecls.properties) {
       // 幂等 + 撤销回填保护（2026-08-05，评审 P1）：
@@ -60,7 +67,7 @@ export async function inferVisibility(wg: WorldGraph, storyTime: string): Promis
       // 1. 该声明在 storyTime 已对该角色可见 → 跳过（重复推断不产生重复 vis- 记录）
       // 2. 曾撤销过（存在 validTo <= storyTime 的闭合记录）→ 新记录 validFrom 取当前
       //    推断时刻，避免回填到撤销时刻之前、静默覆盖撤销区间
-      const mine = (await wg.getVisibilityForDeclaration(decl.declarationId))
+      const mine = (await wg.getVisibilityForDeclaration(decl.declarationId, undefined, opts))
         .filter((v) => v.characterId === rel.sourceId);
       if (mine.some((v) => v.validFrom <= storyTime
         && (v.validTo === INFINITY || storyTime < v.validTo))) {

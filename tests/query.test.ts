@@ -37,5 +37,48 @@ test("traceCauses 多级回溯", withTempWg(async (wg) => {
     causedBy: "evt-b",
   });
   const chain = await wg.traceCauses("evt-c");
-  assert.deepEqual(chain.map((e: any) => e.eventId), ["evt-a", "evt-b", "evt-c"]);
+  assert.ok(chain);
+  assert.deepEqual(chain!.map((e: any) => e.eventId), ["evt-a", "evt-b", "evt-c"]);
+}));
+
+// ============================================================================
+// B5 台账修复（2026-08-07）：getAllEntities 消除 N+1
+// 回归：批量输出必须与逐实体 getEntityAt 结果完全等价（含 recordedAsOf 透传）
+// ============================================================================
+
+test("B5: getAllEntities 输出与逐实体 getEntityAt 等价", withTempWg(async (wg) => {
+  await wg.birthEntity("e1", "character", { name: "甲", mood: "happy" }, "t1", "摘要一");
+  await wg.birthEntity("e2", "location", { temp: "cold" }, "t1");
+  await wg.birthEntity("e3", "item", {}, "t1");
+  await wg.processEvent({
+    eventId: "evt-extra",
+    type: "change",
+    storyTime: "t2",
+    entityId: "e1",
+    newFacts: [{ entityId: "e1", property: "weapon", value: "枪", modality: "belief" }],
+  });
+  for (const t of ["t1", "t2"]) {
+    const all = await wg.getAllEntities(t);
+    assert.equal(all.length, 3);
+    for (const snap of all) {
+      const single = await wg.getEntityAt(snap.entityId, t);
+      assert.deepEqual(snap, single, `getAllEntities 的 ${snap.entityId}@${t} 应与 getEntityAt 一致`);
+    }
+  }
+  // recordedAsOf 透传：改写前时点不含后续补写的 weapon
+  const before = await wg.recordedNow();
+  await wg.processEvent({
+    eventId: "evt-retcon",
+    type: "change",
+    storyTime: "t1",
+    entityId: "e2",
+    newFacts: [{ entityId: "e2", property: "retcon", value: "后补", modality: "fact" }],
+  });
+  const allAsWas = await wg.getAllEntities("t2", { recordedAsOf: before });
+  for (const snap of allAsWas) {
+    const single = await wg.getEntityAt(snap.entityId, "t2", { recordedAsOf: before });
+    assert.deepEqual(snap, single, `recordedAsOf 下 ${snap.entityId} 应与 getEntityAt 一致`);
+  }
+  const e2snap = allAsWas.find((s) => s.entityId === "e2");
+  assert.ok(!e2snap?.properties.some((d) => d.property === "retcon"), "recordedAsOf 应隔离后补写");
 }));

@@ -80,3 +80,50 @@ test("inferVisibility 撤销后再次推断不回填到撤销区间之前", with
   const history = await wg.getVisibilityForDeclaration(decl.declarationId);
   assert.equal(history.length, 2, "历史应为 1 条闭合 + 1 条新开");
 }));
+
+// ============================================================================
+// C3 台账修复（2026-08-07）：幂等写入入口
+// ============================================================================
+
+test("C3: setVisibilityIfAbsent 重复调用不产生重复记录", withTempWg(async (wg) => {
+  await wg.birthEntity("e1", "character", { name: "甲" }, "t1");
+  const declId = "decl-e1-name-t1";
+  const visOpts = {
+    state: "known" as const,
+    confidence: 1,
+    source: "experienced" as const,
+    validFrom: "t1",
+    isExplicit: true,
+  };
+  await wg.setVisibilityIfAbsent("e1", declId, visOpts);
+  // 重复调用：幂等跳过，不抛错
+  await assert.doesNotReject(wg.setVisibilityIfAbsent("e1", declId, visOpts));
+  const all = await wg.getVisibilityForDeclaration(declId);
+  assert.equal(all.length, 1, "重复 IfAbsent 不应产生第二条未闭合 Visibility");
+  // 闭合后可再次写入（只挡"已有未闭合"的情况）
+  await wg.closeVisibility("e1", declId, "t2");
+  await wg.setVisibilityIfAbsent("e1", declId, { ...visOpts, validFrom: "t3" });
+  const history = await wg.getVisibilityForDeclaration(declId);
+  assert.equal(history.length, 2, "闭合后应允许新记录");
+}));
+
+// ============================================================================
+// C4 台账修复（2026-08-07）：可选引用完整性校验（strict 模式）
+// ============================================================================
+
+test("C4: setVisibility strict=true 时 declarationId 不存在抛错", withTempWg(async (wg) => {
+  const visOpts = {
+    state: "known" as const,
+    confidence: 1,
+    source: "informed" as const,
+    validFrom: "t1",
+    isExplicit: true,
+  };
+  await assert.rejects(
+    wg.setVisibility("e1", "decl-ghost", visOpts, { strict: true }),
+    /decl-ghost/,
+    "strict 模式下孤儿 Visibility 应抛错",
+  );
+  // strict 缺省：保持原行为（允许孤儿可见性）
+  await assert.doesNotReject(wg.setVisibility("e1", "decl-ghost", visOpts));
+}));

@@ -133,3 +133,66 @@ test("updateEntityEmbedding: 增量更新后 vector 检索可命中", async () =
     rmSync(dir, { recursive: true, force: true });
   }
 });
+
+// ============================================================================
+// D1 台账修复（2026-08-07）：storyTime 可选格式校验（storyTimePattern）
+// ============================================================================
+
+async function withPatternWg(pattern?: RegExp) {
+  const dir = mkdtempSync(join(tmpdir(), "wg-d1-"));
+  const wg = await WorldGraph.create({
+    dbPath: join(dir, "test.db"),
+    eventLogPath: join(dir, "events.jsonl"),
+    ...(pattern ? { storyTimePattern: pattern } : {}),
+  });
+  return { wg, dir };
+}
+
+test("D1: 配置 storyTimePattern 后非法 storyTime 抛错、合法通过", async () => {
+  const { wg, dir } = await withPatternWg(/^ch\d{3}\.ev\d{3}$/);
+  try {
+    // 非法格式：各写入入口抛带 pattern 信息的 Error
+    await assert.rejects(
+      wg.birthEntity("e1", "character", {}, "act1-scene1"),
+      /ch\\d\{3\}/,
+      "birthEntity 非法 storyTime 应抛带 pattern 信息的错误",
+    );
+    await assert.rejects(
+      wg.processEvent({ eventId: "evt-bad", type: "birth", storyTime: "t1", entityId: "e1" }),
+      /不匹配/,
+      "processEvent 非法 storyTime 应抛错",
+    );
+    await assert.rejects(
+      wg.setVisibility("e1", "decl-x", {
+        state: "known", confidence: 1, source: "experienced", validFrom: "bad", isExplicit: true,
+      }),
+      /不匹配/,
+      "setVisibility 非法 validFrom 应抛错",
+    );
+    // 合法格式：正常通过
+    await wg.birthEntity("e1", "character", {}, "ch001.ev001");
+    await wg.addRelation("e1", "e1", "self", "ch001.ev002");
+    await wg.updateEntitySummary("e1", "摘要", "ch001.ev003");
+    await wg.closeRelation("e1", "e1", "self", "ch001.ev004");
+    await wg.killEntity("e1", "ch001.ev005");
+    const snap = await wg.getEntityAt("e1", "ch001.ev005");
+    assert.equal(snap, null, "合法 storyTime 的全流程写入应生效");
+  } finally {
+    wg.close();
+    const { rmSync } = await import("node:fs");
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("D1: 不配置 storyTimePattern 时任意格式通过（缺省不校验）", async () => {
+  const { wg, dir } = await withPatternWg();
+  try {
+    await wg.birthEntity("e1", "character", {}, "任意格式 2026/8/3");
+    const snap = await wg.getEntityAt("e1", "任意格式 2026/8/3");
+    assert.ok(snap, "缺省不校验，任意 storyTime 格式应通过");
+  } finally {
+    wg.close();
+    const { rmSync } = await import("node:fs");
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
