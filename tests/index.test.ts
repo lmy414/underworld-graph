@@ -30,7 +30,7 @@ test("类型可导入（编译期检查）", () => {
     eventId: "e1", type: "birth", storyTime: "t1", entityId: "x1",
   };
   const decl: StateDeclaration = {
-    declarationId: "d1", entityId: "x1", property: "p", value: "v",
+    declarationId: "d1", entityId: "x1", property: "p", description: "v",
     modality: "fact", validFrom: "t1", validTo: "Infinity",
   };
   const vis: _VisibilityDeclaration = {

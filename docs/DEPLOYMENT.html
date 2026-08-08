@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>underworld-graph 部署与源码指南 · v0.2.0</title>
+<title>underworld-graph 部署与源码指南 · v0.3.0</title>
 <style>
   :root {
     --bg: #fafafa;
@@ -759,14 +759,13 @@ export type EntityType = z.infer&lt;typeof EntityType&gt;;</code></pre>
 
 <p>3 类原子操作。<code>processEvent</code> 按此分派。</p>
 
-<h4>状态声明（行 36-46）</h4>
+<h4>状态声明（行 36-46；0.3.0 字段补全）</h4>
 
 <pre><code>export const StateDeclaration = z.object({
   declarationId: z.string(),
   entityId: z.string(),
   property: z.string(),
-  value: z.unknown(),
-  valueText: z.string().optional(),
+  description: z.string(),
   modality: Modality,
   validFrom: z.string(),
   validTo: z.string(),
@@ -775,10 +774,13 @@ export type EntityType = z.infer&lt;typeof EntityType&gt;;</code></pre>
 <p>TypeGraph 中状态的最小单元。关键字段：</p>
 <ul>
   <li><code>declarationId</code> 全局唯一，格式约定 <code>decl-{entityId}-{property}-{storyTime}</code>。</li>
-  <li><code>value: z.unknown()</code> — 不约束值类型（任何 JSON 可序列化值都行）。</li>
-  <li><code>valueText</code> 可选，是 value 的字符串化版本，参与全文检索（zh 分词）。</li>
+  <li><code>description</code> 必填，状态内容可读文本，参与全文检索（zh 分词）。</li>
   <li><code>validFrom</code> / <code>validTo</code> 时态区间，<code>validTo = "Infinity"</code> 表示未闭合。</li>
 </ul>
+
+<blockquote><p>0.3.0（决策 2026-08-08：不兼容旧版本数据）：删除 <code>value: z.unknown()</code> 与
+<code>valueText</code> 双轨（E1 输出裁剪不一致随之关闭）；<code>birthEntity</code> initialProps /
+extraFacts 值域收窄为 string，非 string 显式抛错。旧库不再迁移，从 0 初始化。</p></blockquote>
 
 <h4>事件来源与事件记录（行 55-93）</h4>
 
@@ -1076,9 +1078,9 @@ import { EventLog } from "./event-log.js";</code></pre>
 
 <p>4 个节点类型：</p>
 <ul>
-  <li><code>EntityNode</code> — 实体。<code>embedding(512)</code> 512 维向量字段（用于相似度检索）。<code>summary</code> 默认空串，是实体无状态客观事实描述。</li>
-  <li><code>FactNode</code> — 状态声明。<code>property</code> 和 <code>valueText</code> 用 <code>searchable({ language: "zh" })</code> 包装，启用中文全文检索。</li>
-  <li><code>RelationNode</code> — 关系三元组（source / target / label）。</li>
+  <li><code>EntityNode</code> — 实体。<code>embedding(512)</code> 512 维向量字段（用于相似度检索）。<code>summary</code> 默认空串，是实体无状态客观事实描述；0.3.0 新增 <code>name</code> / <code>aliases</code> 展示快照（birth 时从「名字」property 提取 name，改名 change 事件自动同步）。</li>
+  <li><code>FactNode</code> — 状态声明。<code>property</code> 和 <code>description</code> 用 <code>searchable({ language: "zh" })</code> 包装，启用中文全文检索（0.3.0 起 value/valueText 退场）。</li>
+  <li><code>RelationNode</code> — 关系三元组（source / target / label）；0.3.0 新增 <code>description</code>（叙事描述，label 收窄为简单类型词后长句归位）。</li>
   <li><code>VisibilityNode</code> — 可见性声明。</li>
 </ul>
 
@@ -1591,9 +1593,9 @@ import type {
 <table>
   <thead><tr><th>节点</th><th>字段</th><th>备注</th></tr></thead>
   <tbody>
-    <tr><td><strong>Entity</strong></td><td>entityId, type, summary, validFrom, validTo, embedding?</td><td>embedding 512 维</td></tr>
-    <tr><td><strong>Fact</strong></td><td>declarationId, entityId, property, value, valueText?, embedding?, modality, validFrom, validTo</td><td>property/valueText 启用 zh 全文检索</td></tr>
-    <tr><td><strong>Relation</strong></td><td>relationId, sourceId, targetId, label, validFrom, validTo</td><td>三元组</td></tr>
+    <tr><td><strong>Entity</strong></td><td>entityId, type, name, aliases, summary, validFrom, validTo, embedding?</td><td>0.3.0 新增 name/aliases 展示快照；embedding 512 维</td></tr>
+    <tr><td><strong>Fact</strong></td><td>declarationId, entityId, property, description, embedding?, modality, validFrom, validTo</td><td>0.3.0 起 property/description 启用 zh 全文检索（value/valueText 退场）</td></tr>
+    <tr><td><strong>Relation</strong></td><td>relationId, sourceId, targetId, label, description, validFrom, validTo</td><td>0.3.0 新增 description（叙事描述）</td></tr>
     <tr><td><strong>Visibility</strong></td><td>visibilityId, characterId, declarationId, state, confidence, source, validFrom, validTo, isExplicit</td><td>state 当前只有 "known"</td></tr>
   </tbody>
 </table>
@@ -1804,7 +1806,7 @@ sudo systemctl restart your-service
       <td>全文索引建在错误文本上，对象类 value 无法被检索</td>
       <td>抽 <code>serializeValueText()</code> helper：对象 JSON.stringify、Date 走 ISO（Invalid Date 兜底 String）、循环引用回退 String</td>
       <td>valueText 不在公开输出里（评审 P2-8 已记），消费方读不到，零影响</td>
-      <td>✅ 0.1.2 已修</td>
+      <td>✅ 0.1.2 已修（0.3.0 随 value/valueText 双轨删除，该 helper 整体退场）</td>
     </tr>
     <tr>
       <td>B2</td>
@@ -1983,7 +1985,7 @@ sudo systemctl restart your-service
       <td>同类声明在不同查询路径输出字段不同，消费方难以依赖统一形状</td>
       <td>统一公开输出的声明字段集（建议公开路径均不含 valueText，或全部含），valueText 定位为内部检索字段</td>
       <td>改公开输出字段属破坏性变更，需消费方确认无人依赖</td>
-      <td>待对齐</td>
+      <td>✅ 0.3.0 已修（value/valueText 整体退场，全部路径统一 description）</td>
     </tr>
     <tr>
       <td>E2</td>
@@ -2043,7 +2045,7 @@ try {
     entityId: "ent-inverness",
     invalidated: [],
     newFacts: [
-      { entityId: "ent-inverness", property: "visitor", value: "Duncan", modality: "fact" },
+      { entityId: "ent-inverness", property: "visitor", description: "Duncan", modality: "fact" },
     ],
     userInput: "邓肯王来到因弗内斯城堡",
   });

@@ -5,6 +5,33 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.0] - 2026-08-08
+
+### Changed（破坏性，semver 0.x 破例升 minor；决策 2026-08-08：不兼容旧版本数据、存量废弃从 0 开始）
+- **Fact.value/valueText 双轨删除，改为 description**：`StateDeclaration` 移除
+  `value: unknown` 与 `valueText`，新增必填 `description: string`（searchable zh，
+  进全文索引）；`EventRecord.newFacts[].value` → `description`（必填，旧 value 键
+  不再兼容）；删除 `serializeValueText()`（任意类型 value 的序列化机制整体退场）。
+  所有公开声明输出路径（getEntityAt / getAllEntities / getAllDeclarations* /
+  getEntityHistory / getCharacterView）形状统一为含 description、不含 value/valueText
+  （E1 台账关闭）。`birthEntity` initialProps/extraFacts 值域收窄为 string，
+  非 string 显式抛错（拒绝 [object Object] 垃圾文本进全文索引）。
+- **Entity 新增 name / aliases 展示快照**：`Entity.name`（缺省 ""）与
+  `Entity.aliases`（缺省 []）；birth 时从「名字」property 提取写入 name 快照，
+  改名 change 事件（property=名字）自动同步（与 updateEntitySummary 同模式）；
+  快照非权威——改名历史/可见性/检索仍由 Fact 承载。`EntitySnapshot` 与
+  getEntityHistory 的 entities 输出同步携带 name/aliases。
+- **Relation 新增 description**：label 收窄为简单类型词（检索/闭合键），叙事长句
+  归位 `description`（缺省 ""）；`addRelation` 的 opts 增加 `description`；
+  getRelations / getAllRelationsAt / getRelationHistory 输出同步携带。
+- **迁移能力保留**：`migrateSchema` 机制与既有测试不变（包能力），但 novel 库
+  不走迁移——0.3.0 起旧库整体废弃，新库从 0 初始化（决策 2026-08-08）。
+
+### Notes
+- 设计定稿与决策记录：`docs/field-redesign-plan-2026-08-08.md`（§二 设计定稿 + 决策 ⑥⑦）。
+- 验证：`npm run typecheck` / `npm run build` 通过，`npm test` 106/106 全绿，
+  `npm run smoke` 通过。
+
 ## [0.2.0] - 2026-08-07
 
 ### Changed（破坏性，semver 0.x 破例升 minor）

@@ -38,7 +38,7 @@ test("inferVisibility 从 located_in 自动推断", withTempWg(async (wg) => {
     type: "change",
     storyTime: "act1-scene4",
     entityId: "ent-inverness",
-    newFacts: [{ entityId: "ent-inverness", property: "visitor", value: "Duncan", modality: "fact" }],
+    newFacts: [{ entityId: "ent-inverness", property: "visitor", description: "Duncan", modality: "fact" }],
   });
   await wg.inferVisibility("act1-scene4");
 }));

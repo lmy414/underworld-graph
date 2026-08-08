@@ -508,15 +508,14 @@ export const EventType = z.enum(["birth", "death", "change"]);
 
 3 类原子操作。`processEvent` 按此分派。
 
-#### 状态声明（行 36-46）
+#### 状态声明（行 36-46；0.3.0 字段补全）
 
 ```typescript
 export const StateDeclaration = z.object({
   declarationId: z.string(),
   entityId: z.string(),
   property: z.string(),
-  value: z.unknown(),
-  valueText: z.string().optional(),
+  description: z.string(),
   modality: Modality,
   validFrom: z.string(),
   validTo: z.string(),
@@ -526,9 +525,12 @@ export const StateDeclaration = z.object({
 TypeGraph 中状态的最小单元。关键字段：
 
 - `declarationId` 全局唯一，格式约定 `decl-{entityId}-{property}-{storyTime}`。
-- `value: z.unknown()` — 不约束值类型（任何 JSON 可序列化值都行）。
-- `valueText` 可选，是 value 的字符串化版本，参与全文检索（zh 分词）。
+- `description` 必填，状态内容可读文本，参与全文检索（zh 分词）。
 - `validFrom` / `validTo` 时态区间，`validTo = "Infinity"` 表示未闭合。
+
+> 0.3.0（决策 2026-08-08：不兼容旧版本数据）：删除 `value: z.unknown()` 与
+> `valueText` 双轨（E1 输出裁剪不一致随之关闭）；`birthEntity` initialProps /
+> extraFacts 值域收窄为 string，非 string 显式抛错。旧库不再迁移，从 0 初始化。
 
 #### 事件来源与事件记录（行 55-93）
 
@@ -886,10 +888,12 @@ const EntityNode = defineNode("Entity", {
 4 个节点类型：
 
 - `EntityNode` — 实体。`embedding(512)` 512 维向量字段（用于相似度检索）。
-  `summary` 默认空串，是实体无状态客观事实描述。
-- `FactNode` — 状态声明。`property` 和 `valueText` 用 `searchable({ language: "zh" })`
-  包装，启用中文全文检索。
-- `RelationNode` — 关系三元组（source / target / label）。
+  `summary` 默认空串，是实体无状态客观事实描述；0.3.0 新增 `name` / `aliases`
+  展示快照（birth 时从「名字」property 提取 name，改名 change 事件自动同步）。
+- `FactNode` — 状态声明。`property` 和 `description` 用 `searchable({ language: "zh" })`
+  包装，启用中文全文检索（0.3.0 起 value/valueText 退场）。
+- `RelationNode` — 关系三元组（source / target / label）；0.3.0 新增
+  `description`（叙事描述，label 收窄为简单类型词后长句归位）。
 - `VisibilityNode` — 可见性声明。
 
 `validFrom` / `validTo` 作为 schema 字段，由应用层管理 bi-temporal 语义。
@@ -1461,9 +1465,9 @@ import type {
 
 | 节点 | 字段 | 备注 |
 |---|---|---|
-| **Entity** | entityId, type, summary, validFrom, validTo, embedding? | embedding 512 维 |
-| **Fact** | declarationId, entityId, property, value, valueText?, embedding?, modality, validFrom, validTo | property/valueText 启用 zh 全文检索 |
-| **Relation** | relationId, sourceId, targetId, label, validFrom, validTo | 三元组 |
+| **Entity** | entityId, type, name, aliases, summary, validFrom, validTo, embedding? | 0.3.0 新增 name/aliases 展示快照；embedding 512 维 |
+| **Fact** | declarationId, entityId, property, description, embedding?, modality, validFrom, validTo | 0.3.0 起 property/description 启用 zh 全文检索（value/valueText 退场） |
+| **Relation** | relationId, sourceId, targetId, label, description, validFrom, validTo | 0.3.0 新增 description（叙事描述） |
 | **Visibility** | visibilityId, characterId, declarationId, state, confidence, source, validFrom, validTo, isExplicit | state 当前只有 "known" |
 
 ### 7.3 ID 生成约定
@@ -1587,6 +1591,8 @@ sudo systemctl restart your-service
 >
 > 修复进度：A 类 7 项 0.1.1 已修；B 类 5 项（B1-B4 于 0.1.2、B5 于 0.2.0）已修；
 > C 类 4 项 0.2.0 已修；D 类 8 项中 D1-D5/D7/D8 共 7 项 0.2.0 已修，D6 仍暂缓。
+> 0.3.0（2026-08-08）：E1 随字段补全关闭；决策"不兼容旧版本数据、存量废弃从 0 开始"，
+> 详见 `docs/field-redesign-plan-2026-08-08.md`。
 >
 > **风险分级定义**：
 > - **A 类**：纯内部清理，零下游影响，可直接修。
@@ -1615,7 +1621,7 @@ sudo systemctl restart your-service
 
 | # | 问题 | 影响 | 修复方案 | 风险点 | 状态 |
 |---|---|---|---|---|---|
-| B1 | [valueText 序列化错误](file:///d:/claude/pi-ex/underworld-graph/src/world-graph.ts) — `String(val)` 对对象/数组变成 `[object Object]` | 全文索引建在错误文本上，对象类 value 无法被检索 | 抽 `serializeValueText()` helper：对象 JSON.stringify、Date 走 ISO（Invalid Date 兜底 String）、循环引用回退 String | valueText 不在公开输出里（评审 P2-8 已记），消费方读不到，零影响 | ✅ 0.1.2 已修 |
+| B1 | [valueText 序列化错误](file:///d:/claude/pi-ex/underworld-graph/src/world-graph.ts) — `String(val)` 对对象/数组变成 `[object Object]` | 全文索引建在错误文本上，对象类 value 无法被检索 | 抽 `serializeValueText()` helper：对象 JSON.stringify、Date 走 ISO（Invalid Date 兜底 String）、循环引用回退 String | valueText 不在公开输出里（评审 P2-8 已记），消费方读不到，零影响 | ✅ 0.1.2 已修（0.3.0 随 value/valueText 双轨删除，该 helper 整体退场） |
 | B2 | [EventLog 单行损坏全文件读不出](file:///d:/claude/pi-ex/underworld-graph/src/event-log.ts) — `readAll` 任意一行 `JSON.parse` 失败会抛错 | 日志文件局部损坏导致整个 `traceBack` / `getAllEvents` 不可用 | `readAll` 逐行 try/catch + `EventRecord.safeParse`，语法损坏与形状不符行跳过（记 stderr） | 消费方不太可能依赖"抛错"语义 | ✅ 0.1.2 已修 |
 | B3 | [inferVisibility 无幂等](file:///d:/claude/pi-ex/underworld-graph/src/character-view.ts) — 重复调用同 storyTime 产生重复 visibility 记录 | 同一 (characterId, declarationId) 多条 visibility 记录，查询结果重复 | 写入前全历史判定（含已闭合）：当前可见跳过；存在 `validTo <= storyTime` 撤销记录则 validFrom 取当前时刻 | 消费方不太可能依赖"重复调用产生重复记录" | ✅ 0.1.2 已修 |
 | B4 | [birthEntity / processEvent.change 无事务回滚](file:///d:/claude/pi-ex/underworld-graph/src/world-graph.ts) — 多步写中途失败留下半成品 | Entity 已建但 Fact 没建全，或旧声明已闭合但新声明没写入，状态不一致 | 多步写包 SDK `store.transaction(tx)`（SDK 自带事务，外层 raw BEGIN 会冲突），事务内读写走 `tx.nodes`，失败整体回滚 | 日志语义已定：JSONL 先写保留审计，状态回滚；未加 `_failed` 标记 | ✅ 0.1.2 已修 |
@@ -1656,9 +1662,22 @@ sudo systemctl restart your-service
 
 | # | 问题 | 影响 | 建议方向 | 对齐难点 | 状态 |
 |---|---|---|---|---|---|
-| E1 | valueText 输出裁剪不一致（评审 P2-8 遗留） — `getEntityHistory` 的 facts 含 `valueText`，`getEntityAt` / `getAllDeclarations*` 不含 | 同类声明在不同查询路径输出字段不同，消费方难以依赖统一形状 | 统一公开输出的声明字段集（建议公开路径均不含 valueText，或全部含），valueText 定位为内部检索字段 | 改公开输出字段属破坏性变更，需消费方确认无人依赖 | 待对齐 |
+| E1 | valueText 输出裁剪不一致（评审 P2-8 遗留） — `getEntityHistory` 的 facts 含 `valueText`，`getEntityAt` / `getAllDeclarations*` 不含 | 同类声明在不同查询路径输出字段不同，消费方难以依赖统一形状 | 统一公开输出的声明字段集（建议公开路径均不含 valueText，或全部含），valueText 定位为内部检索字段 | 改公开输出字段属破坏性变更，需消费方确认无人依赖 | ✅ 0.3.0 已修（value/valueText 整体退场，全部路径统一 description） |
 | E2 | `invalidated[].property` 死字段 — change 事件闭合旧声明只按 declarationId 匹配，property 字段从不被读取 | 误导调用方以为 property 参与匹配；schema 冗余 | 从 zod schema 移除或标注 deprecated；保留期间文档注明"仅展示用途" | 改 EventRecord schema 影响日志形状校验与消费方构造代码 | 待对齐 |
 | E3 | Entity.summary 与 Fact `property="summary"` 双轨 — 实体摘要既可落在 Entity.summary 字段，也可作为普通 Fact property | 两条写入路径语义重叠，检索/展示口径可能不一致 | 明确唯一权威路径（建议 Entity.summary 为唯一权威，Fact 禁写 property="summary"），strict 模式可加校验 | 存量数据可能两种都有，需消费方盘点 | 待对齐 |
+
+### 9.4.2 0.3.0 字段补全记录（2026-08-08）
+
+> 设计定稿与决策：`docs/field-redesign-plan-2026-08-08.md`。
+> 决策：⑥ 不兼容旧版本数据（无运行时兼容层、无旧格式读取、无就地迁移）；
+> ⑦ novel 存量库直接废弃，从 0 初始化（不做迁移/回填）。
+
+| 变更 | 内容 |
+|---|---|
+| Fact.value/valueText 删除 | `StateDeclaration` + `EventRecord.newFacts` 改为必填 `description: string`；`serializeValueText` 删除；birthEntity 值域收窄 string 显式抛错；E1 关闭 |
+| Entity +name/aliases | 展示快照（非权威）：birth 提取「名字」property，改名 change 事件自动同步；aliases 由引擎侧维护（缺省 []） |
+| Relation +description | label 收窄为简单类型词；addRelation opts.description；关系查询输出携带 |
+| 迁移能力 | `migrateSchema` 机制与测试保留（包能力）；novel 库不走迁移 |
 
 ### 9.5 监控建议
 
@@ -1701,7 +1720,7 @@ try {
     entityId: "ent-inverness",
     invalidated: [],
     newFacts: [
-      { entityId: "ent-inverness", property: "visitor", value: "Duncan", modality: "fact" },
+      { entityId: "ent-inverness", property: "visitor", description: "Duncan", modality: "fact" },
     ],
     userInput: "邓肯王来到因弗内斯城堡",
   });

@@ -17,7 +17,7 @@ async function setupWg() {
   return wg;
 }
 
-test("fulltext 检索按 property/valueText 命中", async () => {
+test("fulltext 检索按 property/description 命中", async () => {
   const wg = await setupWg();
   const hits = await wg.search.fulltext("Fact", { query: "Macbeth", limit: 10 });
   assert.ok(hits.length > 0, "应命中 Macbeth 相关 Fact");
@@ -32,16 +32,28 @@ test("fulltext 检索支持中文", async () => {
   wg.close();
 });
 
-test("valueText 序列化：对象 value 可被全文检索命中", async () => {
+test("0.3.0: description 进全文索引（新库端到端冒烟）", async () => {
   const wg = await setupWg();
-  await wg.birthEntity("castle-1", "location", { inventory: { weapon: "sword", gold: 5 } }, "act1-scene1");
-  const hits = await wg.search.fulltext("Fact", { query: "sword", limit: 10 });
+  // 中文长句状态内容应可被全文检索命中。
+  // 注：FTS5 tokenizer 为 unicode61，连续 CJK 整段为一个 token——整串/前缀查询命中，
+  // 短语子串查询不命中（SDK 既定行为，0.2.0 起如此，非本次回归）。
+  const text = "对彩叶怀有复杂的感情";
+  await wg.birthEntity("e-x", "character", { 心情: text }, "ch1");
+  const hits = await wg.search.fulltext("Fact", { query: text, limit: 10 });
   assert.ok(
-    hits.some((h: any) => h.node?.entityId === "castle-1"),
-    "对象 value 应序列化为 JSON 文本而非 [object Object]",
+    hits.some((h: any) => h.node?.entityId === "e-x"),
+    "description 内容应可被全文检索命中",
   );
-  const inventoryHit = hits.find((h: any) => h.node?.entityId === "castle-1");
-  assert.equal(inventoryHit?.node?.valueText, '{"weapon":"sword","gold":5}');
+  wg.close();
+});
+
+test("0.3.0: birthEntity 非 string 值抛错（description string 契约）", async () => {
+  const wg = await setupWg();
+  await assert.rejects(
+    wg.birthEntity("castle-1", "location", { inventory: { weapon: "sword", gold: 5 } }, "act1-scene1"),
+    /必须是 string/,
+    "0.3.0 起对象值应抛错（不再序列化 JSON 文本，由消费方负责提供可读文本）",
+  );
   wg.close();
 });
 

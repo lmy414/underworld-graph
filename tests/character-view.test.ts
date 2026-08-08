@@ -25,13 +25,13 @@ test("characterView 返回角色已知声明（飞书文档步骤 8 Macbeth 示�
     type: "change",
     storyTime: "act1-scene4",
     entityId: "ent-inverness",
-    newFacts: [{ entityId: "ent-inverness", property: "visitor", value: "Duncan", modality: "fact" }],
+    newFacts: [{ entityId: "ent-inverness", property: "visitor", description: "Duncan", modality: "fact" }],
   });
   await wg.inferVisibility("act1-scene4");
   const view = await wg.getCharacterView("ent-macbeth", "act1-scene4", { modalityFilter: ["fact"] });
   const visitorDecl = view.find((d: any) => d.property === "visitor");
   assert.ok(visitorDecl, "Macbeth 应通过 located_in 推断看到 Inverness 的 visitor 声明");
-  assert.equal(visitorDecl.value, "Duncan");
+  assert.equal(visitorDecl.description, "Duncan");
 }));
 
 test("characterView 角色无可见性声明时返回空", withTempWg(async (wg) => {
@@ -49,7 +49,7 @@ test("characterView modalityFilter 过滤", withTempWg(async (wg) => {
     storyTime: "act1-scene2",
     entityId: "ent-macbeth",
     invalidated: [],
-    newFacts: [{ entityId: "ent-macbeth", property: "believes_prophecy", value: true, modality: "belief" }],
+    newFacts: [{ entityId: "ent-macbeth", property: "believes_prophecy", description: "true", modality: "belief" }],
   });
   const snap2 = await wg.getEntityAt("ent-macbeth", "act1-scene2");
   for (const d of snap2!.properties) {
@@ -78,7 +78,7 @@ test("characterView 知识持续：声明闭合后仍可见，直到可见性被
   const viewAfter = await wg.getCharacterView("ent-hero", "act1-scene4");
   const known = viewAfter.find((d: any) => d.declarationId === "decl-ent-master-role-act1-scene1");
   assert.ok(known, "声明闭合后知识仍应可见（知识持续语义）");
-  assert.equal(known.value, "长老");
+  assert.equal(known.description, "长老");
   // 撤销可见性后：不再可见
   await wg.closeVisibility("ent-hero", "decl-ent-master-role-act1-scene1", "act1-scene5");
   const viewRevoked = await wg.getCharacterView("ent-hero", "act1-scene6");

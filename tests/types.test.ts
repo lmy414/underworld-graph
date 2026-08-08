@@ -40,7 +40,7 @@ test("StateDeclaration 校验完整字段", () => {
     declarationId: "decl-1",
     entityId: "ent-macbeth",
     property: "title",
-    value: "Thane of Cawdor",
+    description: "Thane of Cawdor",
     modality: "fact",
     validFrom: "act1-scene1",
     validTo: "Infinity",
@@ -53,7 +53,7 @@ test("StateDeclaration 拒绝 Date 对象作为 validFrom", () => {
     declarationId: "decl-1",
     entityId: "ent-macbeth",
     property: "title",
-    value: "Thane",
+    description: "Thane",
     modality: "fact",
     validFrom: new Date(),
     validTo: "Infinity",
@@ -67,7 +67,7 @@ test("EventRecord 校验 change 事件", () => {
     storyTime: "act2-scene2",
     entityId: "ent-duncan",
     invalidated: [{ declarationId: "decl-old", property: "status" }],
-    newFacts: [{ entityId: "ent-duncan", property: "status", value: "dead", modality: "fact" }],
+    newFacts: [{ entityId: "ent-duncan", property: "status", description: "dead", modality: "fact" }],
     causedBy: "evt-ladym-persuade",
   });
   assert.equal(evt.causedBy, "evt-ladym-persuade");
@@ -81,6 +81,39 @@ test("EventRecord birth 事件可省略 invalidated/newFacts", () => {
     entityId: "ent-macbeth",
   });
   assert.equal(evt.invalidated, undefined);
+});
+
+test("0.3.0: EventRecord.newFacts 缺失 description 拒绝解析（不兼容旧 value 行）", () => {
+  const result = EventRecord.safeParse({
+    eventId: "evt-old-1",
+    type: "change",
+    storyTime: "act2-scene2",
+    entityId: "ent-duncan",
+    newFacts: [{ entityId: "ent-duncan", property: "status", value: "dead", modality: "fact" }],
+  });
+  assert.ok(!result.success, "0.3.0 起 newFacts 必须携带 description，旧 value 键被拒（决策：不兼容旧数据）");
+});
+
+test("0.3.0: StateDeclaration 缺失 description 拒绝解析，旧 value 键被剥离", () => {
+  const noDesc = StateDeclaration.safeParse({
+    declarationId: "decl-1",
+    entityId: "e1",
+    property: "名字",
+    modality: "fact",
+    validFrom: "t1",
+    validTo: "Infinity",
+  });
+  assert.ok(!noDesc.success, "description 为必填字段");
+  const withOldValue = StateDeclaration.safeParse({
+    declarationId: "decl-1",
+    entityId: "e1",
+    property: "名字",
+    value: "旧值",
+    modality: "fact",
+    validFrom: "t1",
+    validTo: "Infinity",
+  });
+  assert.ok(!withOldValue.success, "旧 value 键不能替代 description");
 });
 
 test("VisibilityDeclaration 校验完整字段", () => {

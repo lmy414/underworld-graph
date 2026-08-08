@@ -39,41 +39,6 @@ function asEmbedding(vec: number[]): EmbeddingValue {
 }
 
 /**
- * 把任意 value 序列化为可全文检索的 valueText。
- *
- * 修复（2026-08-05）：纯 `String(val)` 对对象/数组产生 `"[object Object]"`，
- * 使 fulltext 检索永远命中垃圾文本。遵循：
- * - null/undefined 显式处理（undefined 不产生可检索文本）
- * - 原始类型直接 String()
- * - Date 走 ISO 字符串
- * - 对象/数组 JSON.stringify（循环引用失败回退 String()）
- */
-function serializeValueText(value: unknown): string {
-  if (value === null) return "null";
-  if (value === undefined) return "";
-  if (typeof value === "string") return value;
-  if (typeof value === "object" && value instanceof Date) {
-    try {
-      return value.toISOString();
-    } catch {
-      // Invalid Date：回退 String()（"Invalid Date"），与旧行为一致不抛错
-      return String(value);
-    }
-  }
-  if (typeof value === "number" || typeof value === "boolean" || typeof value === "bigint") {
-    return String(value);
-  }
-  if (typeof value === "object") {
-    try {
-      return JSON.stringify(value);
-    } catch {
-      return String(value);
-    }
-  }
-  return String(value);
-}
-
-/**
  * 内部节点记录类型 — SDK 节点 find/scan 返回值的并集。
  *
  * SDK 的节点类型是 branded NodeId + mapped type，动态访问
@@ -86,12 +51,13 @@ interface GraphRecord {
   // Entity
   entityId?: string;
   type?: EntityType;
+  name?: string;
+  aliases?: string[];
   summary?: string;
   // Fact
   declarationId?: string;
   property?: string;
-  value?: unknown;
-  valueText?: string;
+  description?: string;
   modality?: Modality;
   // Relation
   relationId?: string;
@@ -121,6 +87,13 @@ const EntityNode = defineNode("Entity", {
   schema: z.object({
     entityId: z.string(),
     type: EntityType,
+    /**
+     * 0.3.0：展示快照（可视化直接读取，前端不再 fallback properties.名字 || entityId）。
+     * 非权威——改名历史/可见性/检索仍由 Fact property="名字" 承载。
+     */
+    name: z.string().default(""),
+    /** 0.3.0：别名快照，同 name 语义；由引擎侧维护（计划 §九.4） */
+    aliases: z.array(z.string()).default([]),
     summary: z.string().default(""),  // 实体无状态客观事实描述，独立数据字段，参与向量检索，注入角色扮演上下文
     validFrom: z.string(),
     validTo: z.string(),
@@ -133,8 +106,8 @@ const FactNode = defineNode("Fact", {
     declarationId: z.string(),
     entityId: z.string(),
     property: searchable({ language: "zh" }),
-    value: z.unknown(),
-    valueText: searchable({ language: "zh" }).optional(),
+    /** 0.3.0：状态内容文本（替代 value/valueText，searchable 进全文索引） */
+    description: searchable({ language: "zh" }),
     embedding: embedding(512).optional(),
     modality: Modality,
     validFrom: z.string(),
@@ -148,6 +121,10 @@ const RelationNode = defineNode("Relation", {
     sourceId: z.string(),
     targetId: z.string(),
     label: z.string(),
+    /**
+     * 0.3.0：叙事描述——label 收窄为简单类型词（检索/闭合键）后，长句描述归位到此
+     */
+    description: z.string().default(""),
     validFrom: z.string(),
     validTo: z.string(),
   }),
@@ -233,17 +210,29 @@ export interface MigrateResult {
 /**
  * birthEntity 的额外声明（D2/D3 台账修复，2026-08-07）。
  * entityId 缺省时回退事件主实体（由调用方保证填充）；modality 缺省 "fact"。
+ * 0.3.0：value → description（string 契约，见 StateDeclaration）。
  */
 export interface BirthExtraFact {
   entityId: string;
   property: string;
-  value: unknown;
+  description: string;
   modality?: Modality;
 }
+
+/**
+ * 0.3.0：Entity.name 展示快照的来源 property 约定（规则集中文词表）。
+ * birth/改名 change 事件中 property === NAME_PROPERTY 的 Fact 同步写 Entity.name；
+ * 快照非权威，改名历史/可见性/检索仍由该 Fact 承载。
+ */
+const NAME_PROPERTY = "名字";
 
 export interface EntitySnapshot {
   entityId: string;
   type: EntityType;
+  /** 0.3.0：展示快照（非权威），缺省 "" */
+  name: string;
+  /** 0.3.0：别名快照，缺省 [] */
+  aliases: string[];
   summary: string;
   validFrom: string;
   validTo: string;
@@ -542,6 +531,9 @@ export class WorldGraph {
    * 出现多条时，首条保持旧格式 `decl-{entityId}-{property}-{storyTime}`
    * （存量数据 ID 稳定，硬约束），第 2、3… 条追加后缀 `-2`、`-3`。
    * initialProps 与 extraFacts 合并计数。
+   *
+   * 0.3.0：name 展示快照从 initialProps/extraFacts 的 NAME_PROPERTY（"名字"）提取，
+   * 写入 Entity.name；aliases 无来源（引擎侧维护），缺省 []。
    */
   private async birthEntityCore(
     nodes: NodeAccessor,
@@ -562,9 +554,27 @@ export class WorldGraph {
         throw new Error(`strict: Entity ${entityId} 已存活，birthEntity 拒绝重复诞生`);
       }
     }
+    // 0.3.0：name 快照提取（initialProps 优先，extraFacts 兜底；非 string 不落快照）
+    const nameFromProps = initialProps[NAME_PROPERTY];
+    const nameSnapshot = typeof nameFromProps === "string"
+      ? nameFromProps
+      : (extraFacts?.find((f) => f.property === NAME_PROPERTY)?.description ?? "");
+    // 0.3.0：description 是 string 契约——写入前整体校验，避免 Entity 已建后中途抛错
+    // 留下半成品（拒绝 [object Object] 垃圾文本进全文索引）
+    const validatedProps: Record<string, string> = {};
+    for (const [prop, val] of Object.entries(initialProps)) {
+      if (typeof val !== "string") {
+        throw new Error(
+          `0.3.0: initialProps["${prop}"] 的值必须是 string（StateDeclaration.description 契约，不再支持任意类型 value）`,
+        );
+      }
+      validatedProps[prop] = val;
+    }
     await nodes.Entity.create({
       entityId,
       type: entityType,
+      name: nameSnapshot,
+      aliases: [],  // 0.3.0：别名快照由引擎侧维护（计划 §九.4），包内暂无来源
       summary: summary ?? "",
       validFrom: storyTime,
       validTo: INFINITY,
@@ -578,13 +588,12 @@ export class WorldGraph {
       const base = `decl-${targetEntityId}-${property}-${storyTime}`;
       return n === 1 ? base : `${base}-${n}`;
     };
-    for (const [prop, val] of Object.entries(initialProps)) {
+    for (const [prop, val] of Object.entries(validatedProps)) {
       await nodes.Fact.create({
         declarationId: nextDeclId(entityId, prop),
         entityId,
         property: prop,
-        value: val,
-        valueText: serializeValueText(val),
+        description: val,
         modality: "fact",
         validFrom: storyTime,
         validTo: INFINITY,
@@ -597,8 +606,7 @@ export class WorldGraph {
         declarationId: nextDeclId(targetEntityId, f.property),
         entityId: targetEntityId,
         property: f.property,
-        value: f.value,
-        valueText: serializeValueText(f.value),
+        description: f.description,
         modality: f.modality ?? "fact",
         validFrom: storyTime,
         validTo: INFINITY,
@@ -671,7 +679,7 @@ export class WorldGraph {
             declarationId: f.declarationId,
             entityId: f.entityId,
             property: f.property,
-            value: f.value,
+            description: f.description ?? "",
             modality: f.modality,
             validFrom: f.validFrom,
             validTo: f.validTo,
@@ -680,6 +688,8 @@ export class WorldGraph {
     return {
       entityId,
       type: ent.type!,
+      name: ent.name ?? "",
+      aliases: ent.aliases ?? [],
       summary: ent.summary ?? "",
       validFrom: ent.validFrom,
       validTo: ent.validTo,
@@ -692,7 +702,7 @@ export class WorldGraph {
     targetId: string,
     label: string,
     storyTime: string,
-    opts?: { strict?: boolean },
+    opts?: { strict?: boolean; description?: string },
   ): Promise<void> {
     this.assertStoryTime(storyTime);
     if (opts?.strict) {
@@ -712,6 +722,8 @@ export class WorldGraph {
       sourceId,
       targetId,
       label,
+      // 0.3.0：叙事描述（label 收窄为简单类型词后长句归位到此）
+      description: opts?.description ?? "",
       validFrom: storyTime,
       validTo: INFINITY,
     });
@@ -783,6 +795,7 @@ export class WorldGraph {
     sourceId: string;
     targetId: string;
     label: string;
+    description: string;
     validFrom: string;
     validTo: string;
   }>> {
@@ -803,6 +816,7 @@ export class WorldGraph {
         sourceId: r.sourceId!,
         targetId: r.targetId!,
         label: r.label!,
+        description: r.description ?? "",
         validFrom: r.validFrom,
         validTo: r.validTo,
       }));
@@ -859,7 +873,7 @@ export class WorldGraph {
           (event.newFacts ?? []).map((f) => ({
             entityId: f.entityId ?? event.entityId,
             property: f.property,
-            value: f.value,
+            description: f.description,
             modality: f.modality,
           })),
           // C4：strict 透传 —— 严格模式下实体已存活时 birthEntityCore 抛错
@@ -907,19 +921,28 @@ export class WorldGraph {
             await tx.nodes.Fact.update(oldFact.id, { validTo: event.storyTime });
           }
         }
-        // 写入新声明
+        // 写入新声明（0.3.0：value → description，string 契约）
         for (const fact of event.newFacts ?? []) {
           const declarationId = `decl-${fact.entityId}-${fact.property}-${event.storyTime}`;
           await tx.nodes.Fact.create({
             declarationId,
             entityId: fact.entityId,
             property: fact.property,
-            value: fact.value,
-            valueText: serializeValueText(fact.value),
+            description: fact.description,
             modality: fact.modality,
             validFrom: event.storyTime,
             validTo: INFINITY,
           });
+          // 0.3.0：改名（property=名字）同步 Entity.name 展示快照（计划 §五 同步规则，
+          // 与 updateEntitySummary 同模式：引擎写名字 Fact，包内同步快照字段）
+          if (fact.property === NAME_PROPERTY) {
+            const ents = await tx.nodes.Entity.find({
+              where: (e) => e.entityId.eq(fact.entityId).and(e.validTo.eq(INFINITY)),
+            });
+            if (ents[0]) {
+              await tx.nodes.Entity.update(ents[0].id, { name: fact.description });
+            }
+          }
         }
         break;
     }
@@ -1114,7 +1137,7 @@ export class WorldGraph {
         declarationId: f.declarationId!,
         entityId: f.entityId!,
         property: f.property!,
-        value: f.value,
+        description: f.description ?? "",
         modality: f.modality!,
         validFrom: f.validFrom,
         validTo: f.validTo,
@@ -1132,7 +1155,7 @@ export class WorldGraph {
         declarationId: f.declarationId!,
         entityId: f.entityId!,
         property: f.property!,
-        value: f.value,
+        description: f.description ?? "",
         modality: f.modality!,
         validFrom: f.validFrom,
         validTo: f.validTo,
@@ -1141,7 +1164,7 @@ export class WorldGraph {
 
   async getAllRelationsAt(storyTime: string, opts?: TemporalQueryOpts): Promise<Array<{
     relationId: string; sourceId: string; targetId: string;
-    label: string; validFrom: string; validTo: string;
+    label: string; description: string; validFrom: string; validTo: string;
   }>> {
     const rels = await this.findNodes("Relation", opts?.recordedAsOf);
     return rels
@@ -1152,6 +1175,7 @@ export class WorldGraph {
         sourceId: r.sourceId!,
         targetId: r.targetId!,
         label: r.label!,
+        description: r.description ?? "",
         validFrom: r.validFrom,
         validTo: r.validTo,
       }));
@@ -1201,7 +1225,7 @@ export class WorldGraph {
               declarationId: f.declarationId,
               entityId: f.entityId,
               property: f.property,
-              value: f.value,
+              description: f.description ?? "",
               modality: f.modality,
               validFrom: f.validFrom,
               validTo: f.validTo,
@@ -1210,6 +1234,8 @@ export class WorldGraph {
       snapshots.push({
         entityId: ent.entityId!,
         type: ent.type!,
+        name: ent.name ?? "",
+        aliases: ent.aliases ?? [],
         summary: ent.summary ?? "",
         validFrom: ent.validFrom,
         validTo: ent.validTo,
@@ -1228,6 +1254,8 @@ export class WorldGraph {
     entities: Array<{
       entityId: string;
       type: EntityType;
+      name: string;
+      aliases: string[];
       summary: string;
       validFrom: string;
       validTo: string;
@@ -1250,6 +1278,8 @@ export class WorldGraph {
       .map((e) => ({
         entityId: e.entityId!,
         type: e.type!,
+        name: e.name ?? "",
+        aliases: e.aliases ?? [],
         summary: e.summary ?? "",
         validFrom: e.validFrom,
         validTo: e.validTo,
@@ -1267,8 +1297,7 @@ export class WorldGraph {
         declarationId: f.declarationId,
         entityId: f.entityId,
         property: f.property,
-        value: f.value,
-        valueText: f.valueText,
+        description: f.description ?? "",
         modality: f.modality,
         validFrom: f.validFrom,
         validTo: f.validTo,
@@ -1289,6 +1318,7 @@ export class WorldGraph {
     sourceId: string;
     targetId: string;
     label: string;
+    description: string;
     validFrom: string;
     validTo: string;
   }>> {
@@ -1308,6 +1338,7 @@ export class WorldGraph {
         sourceId: r.sourceId!,
         targetId: r.targetId!,
         label: r.label!,
+        description: r.description ?? "",
         validFrom: r.validFrom,
         validTo: r.validTo,
       }))
@@ -1368,8 +1399,7 @@ export class WorldGraph {
         declarationId: f.declarationId,
         entityId: f.entityId,
         property: f.property,
-        value: f.value,
-        valueText: f.valueText,
+        description: f.description ?? "",
         modality: f.modality,
         validFrom: f.validFrom,
         validTo: f.validTo,

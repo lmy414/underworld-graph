@@ -32,13 +32,16 @@ export type EventType = z.infer<typeof EventType>;
  * 状态声明 — TypeGraph 中状态的最小单元（飞书文档"步骤 1"）
  * 每条声明独立持有 validFrom/validTo 时态区间
  * validTo = "Infinity" 表示未闭合
+ *
+ * 0.3.0（字段补全）：删除 value/valueText 双轨，新增 description（状态内容文本，
+ * searchable，进全文索引）——一条状态一个可读描述，E1 输出裁剪不一致随之消除。
+ * 不做旧版本数据兼容（决策 2026-08-08：不兼容旧数据、存量废弃从 0 开始）。
  */
 export const StateDeclaration = z.object({
   declarationId: z.string(),
   entityId: z.string(),
   property: z.string(),
-  value: z.unknown(),
-  valueText: z.string().optional(),
+  description: z.string(),
   modality: Modality,
   validFrom: z.string(),  // ISO 8601 字符串或故事时间标识
   validTo: z.string(),    // "Infinity" = 未闭合
@@ -72,7 +75,8 @@ export const EventRecord = z.object({
   newFacts: z.array(z.object({
     entityId: z.string(),
     property: z.string(),
-    value: z.unknown(),
+    // 0.3.0：value → description（string 契约），不做旧行兼容
+    description: z.string(),
     modality: Modality,
   })).optional(),
   causedBy: z.string().optional(),

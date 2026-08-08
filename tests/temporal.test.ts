@@ -43,17 +43,17 @@ test("双时态实体快照：recordedAsOf 隔离后续改写（retcon 隔离）
     storyTime: "ch002.ev001",
     entityId: "e-caiye",
     invalidated: [{ declarationId: "decl-e-caiye-mood-ch001.ev001", property: "mood" }],
-    newFacts: [{ entityId: "e-caiye", property: "mood", value: "sad", modality: "fact" }],
+    newFacts: [{ entityId: "e-caiye", property: "mood", description: "sad", modality: "fact" }],
   });
 
   // 单时态（现行行为）：ch002 时刻 mood=sad
   const live = await wg.getEntityAt("e-caiye", "ch002.ev001");
-  assert.equal(live?.properties.find((p) => p.property === "mood")?.value, "sad");
+  assert.equal(live?.properties.find((p) => p.property === "mood")?.description, "sad");
 
   // 双时态：ch002 时刻，但只含改写前写入的内容 → mood=happy 且未闭合
   const asWas = await wg.getEntityAt("e-caiye", "ch002.ev001", { recordedAsOf: before });
   const mood = asWas?.properties.find((p) => p.property === "mood");
-  assert.equal(mood?.value, "happy");
+  assert.equal(mood?.description, "happy");
   assert.equal(mood?.validTo, "Infinity");
 }));
 
@@ -65,7 +65,7 @@ test("双时态角色视角：后补写的历史 Fact 对 recordedAsOf 不可见
     type: "change",
     storyTime: "ch001.ev002",
     entityId: "e-lin",
-    newFacts: [{ entityId: "e-lin", property: "weapon", value: "枪", modality: "fact" }],
+    newFacts: [{ entityId: "e-lin", property: "weapon", description: "枪", modality: "fact" }],
   });
   await wg.setVisibility("e-lin", "decl-e-lin-weapon-ch001.ev002", {
     state: "known", confidence: 1, source: "experienced", validFrom: "ch001.ev002", isExplicit: true,
@@ -78,7 +78,7 @@ test("双时态角色视角：后补写的历史 Fact 对 recordedAsOf 不可见
     type: "change",
     storyTime: "ch001.ev001",
     entityId: "e-lin",
-    newFacts: [{ entityId: "e-lin", property: "birthplace", value: "东京", modality: "fact" }],
+    newFacts: [{ entityId: "e-lin", property: "birthplace", description: "东京", modality: "fact" }],
   });
   await wg.setVisibility("e-lin", "decl-e-lin-birthplace-ch001.ev001", {
     state: "known", confidence: 1, source: "informed", validFrom: "ch001.ev003", isExplicit: true,
@@ -140,7 +140,7 @@ test("getEntityHistory 附带写入时间（createdAt/updatedAt）", withTempWg(
     storyTime: "ch002.ev001",
     entityId: "e1",
     invalidated: [{ declarationId: "decl-e1-mood-ch001.ev001", property: "mood" }],
-    newFacts: [{ entityId: "e1", property: "mood", value: "sad", modality: "fact" }],
+    newFacts: [{ entityId: "e1", property: "mood", description: "sad", modality: "fact" }],
   });
   const { facts } = await wg.getEntityHistory("e1");
   const closed = facts.find((f) => f.declarationId === "decl-e1-mood-ch001.ev001");
@@ -179,7 +179,7 @@ test("C2: getEntityHistory 带 recordedAsOf 隔离后续写入", withTempWg(asyn
     storyTime: "ch002.ev001",
     entityId: "e1",
     invalidated: [{ declarationId: "decl-e1-mood-ch001.ev001", property: "mood" }],
-    newFacts: [{ entityId: "e1", property: "mood", value: "sad", modality: "fact" }],
+    newFacts: [{ entityId: "e1", property: "mood", description: "sad", modality: "fact" }],
   });
   // live：两条 Fact（happy 已闭合 + sad）
   const live = await wg.getEntityHistory("e1");
@@ -191,7 +191,7 @@ test("C2: getEntityHistory 带 recordedAsOf 隔离后续写入", withTempWg(asyn
   // recordedAsOf=before：改写前的历史 —— happy 未闭合，sad 不存在
   const asWas = await wg.getEntityHistory("e1", { recordedAsOf: before });
   assert.equal(asWas.facts.length, 1, "recordedAsOf 应隔离后续补写的 Fact");
-  assert.equal(asWas.facts[0].value, "happy");
+  assert.equal(asWas.facts[0].description, "happy");
   assert.equal(asWas.facts[0].validTo, "Infinity", "recordedAsOf 时点 happy 尚未闭合");
 }));
 

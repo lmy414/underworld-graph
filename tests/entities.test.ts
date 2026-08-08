@@ -31,7 +31,7 @@ test("birthEntity 创建实体 + 初始属性", withTempWg(async (wg) => {
   assert.equal(snap.validTo, "Infinity");
   const titleDecl = snap.properties.find((d: any) => d.property === "title");
   assert.ok(titleDecl, "应有 title 属性声明");
-  assert.equal(titleDecl.value, "Thane of Glamis");
+  assert.equal(titleDecl.description, "Thane of Glamis");
   assert.equal(titleDecl.modality, "fact");
 }));
 
@@ -50,13 +50,12 @@ test("killEntity 闭合实体 validTo", withTempWg(async (wg) => {
   assert.equal(after, null, "消亡时间点应返回 null");
 }));
 
-test("birthEntity 接受 Invalid Date 值（valueText 序列化兜底不抛错）", withTempWg(async (wg) => {
-  await assert.doesNotReject(
-    wg.birthEntity("ent-a", "character", { timestamp: new Date("not-a-date") }, "t1"),
-    "Invalid Date 不应让序列化抛 RangeError",
+test("0.3.0: birthEntity 非 string 值抛错（description string 契约，不做任意类型兼容）", withTempWg(async (wg) => {
+  await assert.rejects(
+    wg.birthEntity("ent-a", "character", { inventory: { weapon: "sword" } }, "t1"),
+    /必须是 string/,
+    "0.3.0 起 initialProps 值域收窄为 string，对象值应显式抛错而非 [object Object] 垃圾",
   );
-  const snap = await wg.getEntityAt("ent-a", "t1");
-  assert.ok(snap, "实体应正常创建");
 }));
 
 test("addRelation + getRelations", withTempWg(async (wg) => {
@@ -84,8 +83,8 @@ test("closeRelation 闭合关系", withTempWg(async (wg) => {
 
 test("D2/D3: birthEntity extraFacts 逐条写 Fact，与 initialProps 合并计数声明 ID", withTempWg(async (wg) => {
   await wg.birthEntity("e1", "character", { tag: "a" }, "t1", undefined, [
-    { entityId: "e1", property: "tag", value: "b" },
-    { entityId: "e1", property: "tag", value: "c", modality: "belief" },
+    { entityId: "e1", property: "tag", description: "b" },
+    { entityId: "e1", property: "tag", description: "c", modality: "belief" },
   ]);
   const snap = await wg.getEntityAt("e1", "t1");
   const tags = snap!.properties.filter((d) => d.property === "tag");
@@ -93,9 +92,9 @@ test("D2/D3: birthEntity extraFacts 逐条写 Fact，与 initialProps 合并计�
   const ids = tags.map((d) => d.declarationId).sort();
   assert.deepEqual(ids, ["decl-e1-tag-t1", "decl-e1-tag-t1-2", "decl-e1-tag-t1-3"]);
   // extraFacts modality 透传（缺省 "fact"）
-  const belief = tags.find((d) => d.value === "c");
+  const belief = tags.find((d) => d.description === "c");
   assert.equal(belief?.modality, "belief");
-  const second = tags.find((d) => d.value === "b");
+  const second = tags.find((d) => d.description === "b");
   assert.equal(second?.modality, "fact", "extraFacts modality 缺省应为 fact");
 }));
 
@@ -174,7 +173,7 @@ test("C3: birthEntityUpsert 重复调用不产生重复记录", withTempWg(async
   // 重复调用：幂等跳过，不抛错
   await assert.doesNotReject(wg.birthEntityUpsert("e1", "character", { name: "乙" }, "t2"));
   const snap = await wg.getEntityAt("e1", "t1");
-  assert.equal(snap?.properties.find((d) => d.property === "name")?.value, "甲", "首次写入保留");
+  assert.equal(snap?.properties.find((d) => d.property === "name")?.description, "甲", "首次写入保留");
   const { entities } = await wg.getEntityHistory("e1");
   assert.equal(entities.length, 1, "重复 upsert 不应产生第二条 Entity 记录");
 }));
@@ -218,4 +217,77 @@ test("D5: updateEntitySummary 同毫秒重复调用事件 ID 不撞键（复核�
   // traceCauses 按 eventId 索引，撞键会互相覆盖；此处验证两条都可独立回溯
   assert.equal((await wg.traceCauses(evts[0].eventId))?.[0].summary, "摘要一");
   assert.equal((await wg.traceCauses(evts[1].eventId))?.[0].summary, "摘要二");
+}));
+
+// ============================================================================
+// 0.3.0 字段补全：Entity.name/aliases 快照 + Relation.description
+// （计划 field-redesign-plan-2026-08-08 §二，2026-08-08）
+// ============================================================================
+
+test("0.3.0: birthEntity 含「名字」property 时 Entity.name 快照写入", withTempWg(async (wg) => {
+  await wg.birthEntity("ent-caiye", "character", { 名字: "酒寄彩叶", 心情: "好奇" }, "ch001.ev001");
+  const snap = await wg.getEntityAt("ent-caiye", "ch001.ev001");
+  assert.ok(snap);
+  assert.equal(snap.name, "酒寄彩叶", "Entity.name 快照应取自「名字」property");
+  assert.deepEqual(snap.aliases, [], "0.3.0 别名快照无来源，缺省空数组");
+  // 快照字段同时出现在 getAllEntities / getEntityHistory
+  const all = await wg.getAllEntities("ch001.ev001");
+  assert.equal(all.find((e) => e.entityId === "ent-caiye")?.name, "酒寄彩叶");
+  const { entities } = await wg.getEntityHistory("ent-caiye");
+  assert.equal(entities[0].name, "酒寄彩叶");
+  assert.deepEqual(entities[0].aliases, []);
+}));
+
+test("0.3.0: birth 事件 newFacts 含「名字」时 Entity.name 快照写入（extraFacts 兜底）", withTempWg(async (wg) => {
+  await wg.processEvent({
+    eventId: "evt-birth-name",
+    type: "birth",
+    storyTime: "ch001.ev001",
+    entityId: "e-hero",
+    newFacts: [{ entityId: "e-hero", property: "名字", description: "星野铃", modality: "fact" }],
+  });
+  const snap = await wg.getEntityAt("e-hero", "ch001.ev001");
+  assert.equal(snap?.name, "星野铃", "birth 事件路径也应写 name 快照");
+}));
+
+test("0.3.0: 改名 change 事件（property=名字）同步更新 Entity.name 快照", withTempWg(async (wg) => {
+  await wg.birthEntity("ent-caiye", "character", { 名字: "酒寄彩叶" }, "ch001.ev001");
+  await wg.processEvent({
+    eventId: "evt-rename",
+    type: "change",
+    storyTime: "ch002.ev001",
+    entityId: "ent-caiye",
+    invalidated: [{ declarationId: "decl-ent-caiye-名字-ch001.ev001", property: "名字" }],
+    newFacts: [{ entityId: "ent-caiye", property: "名字", description: "彩叶", modality: "fact" }],
+  });
+  const snap = await wg.getEntityAt("ent-caiye", "ch002.ev001");
+  assert.equal(snap?.name, "彩叶", "改名事件应同步 Entity.name 展示快照（与 updateEntitySummary 同模式）");
+  // 非「名字」property 不影响快照
+  await wg.processEvent({
+    eventId: "evt-mood",
+    type: "change",
+    storyTime: "ch003.ev001",
+    entityId: "ent-caiye",
+    newFacts: [{ entityId: "ent-caiye", property: "心情", description: "愤怒", modality: "fact" }],
+  });
+  const snap2 = await wg.getEntityAt("ent-caiye", "ch003.ev001");
+  assert.equal(snap2?.name, "彩叶", "非名字 property 变更不应改 name 快照");
+}));
+
+test("0.3.0: addRelation 携带 description（label 收窄后长句描述归位）", withTempWg(async (wg) => {
+  await wg.birthEntity("ent-a", "character", {}, "t1");
+  await wg.birthEntity("ent-b", "character", {}, "t1");
+  await wg.addRelation("ent-a", "ent-b", "朋友", "t1", {
+    description: "KASSEN 游戏中的对手，现实初次见面",
+  });
+  const rels = await wg.getRelations("ent-a", "t1");
+  assert.equal(rels[0].label, "朋友", "label 保持简单类型词");
+  assert.equal(rels[0].description, "KASSEN 游戏中的对手，现实初次见面");
+  // 未传 description 时缺省空串
+  await wg.addRelation("ent-a", "ent-b", "认识", "t2");
+  const rels2 = await wg.getRelations("ent-a", "t2");
+  assert.equal(rels2.find((r) => r.label === "认识")?.description, "");
+  // 历史查询同样带 description
+  const history = await wg.getRelationHistory("ent-a");
+  assert.equal(history.find((r) => r.label === "朋友")?.description, "KASSEN 游戏中的对手，现实初次见面");
 }));

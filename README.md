@@ -43,7 +43,7 @@ await wg.processEvent({
   entityId: "ent-macbeth",
   invalidated: [],
   newFacts: [
-    { entityId: "ent-macbeth", property: "mood", value: "ambitious", modality: "fact" },
+    { entityId: "ent-macbeth", property: "mood", description: "ambitious", modality: "fact" },
   ],
 });
 

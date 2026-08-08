@@ -95,7 +95,7 @@ test("processEvent DB 写入失败时事务回滚：状态不变、日志保留�
   );
   const snap = await wg.getEntityAt("ent-a", "t2");
   assert.ok(snap, "既有实体状态不应被部分应用破坏");
-  assert.equal(snap!.properties.find((d: any) => d.property === "status")?.value, "alive");
+  assert.equal(snap!.properties.find((d: any) => d.property === "status")?.description, "alive");
   const chain = await wg.traceCauses("evt-death-missing");
   assert.ok(chain, "失败事件仍留在 JSONL（因果链审计语义）");
   assert.equal(chain!.length, 1);
@@ -107,7 +107,7 @@ test("processEvent type=birth 等价 birthEntity", withTempWg(async (wg) => {
     type: "birth",
     storyTime: "act1-scene1",
     entityId: "ent-macbeth",
-    newFacts: [{ entityId: "ent-macbeth", property: "title", value: "Thane", modality: "fact" }],
+    newFacts: [{ entityId: "ent-macbeth", property: "title", description: "Thane", modality: "fact" }],
   });
   const snap = await wg.getEntityAt("ent-macbeth", "act1-scene1");
   assert.ok(snap);
@@ -122,15 +122,15 @@ test("processEvent type=change 闭合旧声明 + 写入新声明", withTempWg(as
     storyTime: "act2-scene2",
     entityId: "ent-duncan",
     invalidated: [{ declarationId: "decl-ent-duncan-status-act1-scene1", property: "status" }],
-    newFacts: [{ entityId: "ent-duncan", property: "status", value: "dead", modality: "fact" }],
+    newFacts: [{ entityId: "ent-duncan", property: "status", description: "dead", modality: "fact" }],
     causedBy: "evt-birth-1",
   });
   const before = await wg.getEntityAt("ent-duncan", "act2-scene1");
   const beforeStatus = before?.properties.find((d: any) => d.property === "status");
-  assert.equal(beforeStatus?.value, "alive", "变更前应为 alive");
+  assert.equal(beforeStatus?.description, "alive", "变更前应为 alive");
   const after = await wg.getEntityAt("ent-duncan", "act2-scene2");
   const afterStatus = after?.properties.find((d: any) => d.property === "status");
-  assert.equal(afterStatus?.value, "dead", "变更后应为 dead");
+  assert.equal(afterStatus?.description, "dead", "变更后应为 dead");
 }));
 
 test("processEvent type=death 等价 killEntity", withTempWg(async (wg) => {
@@ -164,7 +164,7 @@ test("processEvent 持久化 userInput（用户口述原文）", withTempWg(asyn
     type: "change",
     storyTime: "ch001.ev001",
     entityId: "e1",
-    newFacts: [{ entityId: "e1", property: "mood", value: "好奇", modality: "fact" }],
+    newFacts: [{ entityId: "e1", property: "mood", description: "好奇", modality: "fact" }],
     userInput: "彩叶推开咖啡厅的门",
   });
   const events = await wg.getAllEvents();
@@ -194,9 +194,9 @@ test("D2: birth 事件同 property 多条 newFacts 全部保留，声明 ID 首�
     storyTime: "ch001.ev001",
     entityId: "e-multi",
     newFacts: [
-      { entityId: "e-multi", property: "alias", value: "甲", modality: "fact" },
-      { entityId: "e-multi", property: "alias", value: "乙", modality: "fact" },
-      { entityId: "e-multi", property: "alias", value: "丙", modality: "fact" },
+      { entityId: "e-multi", property: "alias", description: "甲", modality: "fact" },
+      { entityId: "e-multi", property: "alias", description: "乙", modality: "fact" },
+      { entityId: "e-multi", property: "alias", description: "丙", modality: "fact" },
     ],
   });
   const snap = await wg.getEntityAt("e-multi", "ch001.ev001");
@@ -209,7 +209,7 @@ test("D2: birth 事件同 property 多条 newFacts 全部保留，声明 ID 首�
     "decl-e-multi-alias-ch001.ev001-2",  // 次条追加 -2
     "decl-e-multi-alias-ch001.ev001-3",
   ]);
-  const values = aliases.map((d) => d.value).sort();
+  const values = aliases.map((d) => d.description).sort();
   assert.deepEqual(values, ["丙", "乙", "甲"]);
 }));
 
@@ -221,14 +221,14 @@ test("D2: birth 事件跨实体 newFacts 落到正确实体", withTempWg(async (
     storyTime: "ch001.ev002",
     entityId: "e-main",
     newFacts: [
-      { entityId: "e-main", property: "name", value: "主角", modality: "fact" },
-      { entityId: "e-other", property: "mark", value: "被标记", modality: "fact" },
+      { entityId: "e-main", property: "name", description: "主角", modality: "fact" },
+      { entityId: "e-other", property: "mark", description: "被标记", modality: "fact" },
     ],
   });
   // 跨实体声明落到 e-other（旧实现 f.entityId 被忽略，静默丢到主实体）
   const other = await wg.getEntityAt("e-other", "ch001.ev002");
   assert.equal(
-    other?.properties.find((d) => d.property === "mark")?.value,
+    other?.properties.find((d) => d.property === "mark")?.description,
     "被标记",
     "跨实体 newFacts 应落到 f.entityId 指定的实体",
   );
@@ -243,7 +243,7 @@ test("D3: birth 事件 newFacts modality 透传落库", withTempWg(async (wg) =>
     storyTime: "ch001.ev001",
     entityId: "e-belief",
     newFacts: [
-      { entityId: "e-belief", property: "motive", value: "复仇", modality: "belief" },
+      { entityId: "e-belief", property: "motive", description: "复仇", modality: "belief" },
     ],
   });
   const snap = await wg.getEntityAt("e-belief", "ch001.ev001");
@@ -298,7 +298,7 @@ test("C4: processEvent strict=true 时孤儿 newFacts 抛错", withTempWg(async 
       type: "change",
       storyTime: "t2",
       entityId: "e-alive",
-      newFacts: [{ entityId: "e-ghost", property: "p", value: "v", modality: "fact" }],
+      newFacts: [{ entityId: "e-ghost", property: "p", description: "v", modality: "fact" }],
       strict: true,
     }),
     /e-ghost/,
@@ -314,7 +314,7 @@ test("C4: processEvent strict 缺省不校验，且 strict 不落事件日志", 
       type: "change",
       storyTime: "t1",
       entityId: "e-x",
-      newFacts: [{ entityId: "e-ghost", property: "p", value: "v", modality: "fact" }],
+      newFacts: [{ entityId: "e-ghost", property: "p", description: "v", modality: "fact" }],
     }),
   );
   // strict=true 且引用存活实体：正常通过
@@ -324,7 +324,7 @@ test("C4: processEvent strict 缺省不校验，且 strict 不落事件日志", 
     type: "change",
     storyTime: "t2",
     entityId: "e-alive",
-    newFacts: [{ entityId: "e-alive", property: "p", value: "v", modality: "fact" }],
+    newFacts: [{ entityId: "e-alive", property: "p", description: "v", modality: "fact" }],
     strict: true,
   });
   const evt = (await wg.getAllEvents()).find((e) => e.eventId === "evt-strict-ok");
@@ -356,7 +356,7 @@ test("C4: processEvent change strict=true 时 invalidated 悬空 declarationId �
       storyTime: "t2",
       entityId: "e1",
       invalidated: [{ declarationId: "decl-ghost", property: "mood" }],
-      newFacts: [{ entityId: "e1", property: "mood", value: "sad", modality: "fact" }],
+      newFacts: [{ entityId: "e1", property: "mood", description: "sad", modality: "fact" }],
       strict: true,
     }),
     /decl-ghost/,
@@ -369,7 +369,7 @@ test("C4: processEvent change strict=true 时 invalidated 悬空 declarationId �
     storyTime: "t2",
     entityId: "e1",
     invalidated: [{ declarationId: "decl-e1-mood-t1", property: "mood" }],
-    newFacts: [{ entityId: "e1", property: "mood", value: "sad", modality: "fact" }],
+    newFacts: [{ entityId: "e1", property: "mood", description: "sad", modality: "fact" }],
   });
   await assert.rejects(
     wg.processEvent({

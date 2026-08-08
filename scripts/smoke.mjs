@@ -25,7 +25,7 @@ try {
     storyTime: "act1-scene4",
     entityId: "ent-inverness",
     invalidated: [],
-    newFacts: [{ entityId: "ent-inverness", property: "visitor", value: "Duncan", modality: "fact" }],
+    newFacts: [{ entityId: "ent-inverness", property: "visitor", description: "Duncan", modality: "fact" }],
     causedBy: undefined,
   });
 
@@ -37,7 +37,7 @@ try {
   console.log("  可见声明数:", view.length);
   const visitor = view.find((d) => d.property === "visitor");
   if (!visitor) throw new Error("Macbeth 应看到 visitor 声明");
-  console.log("  visitor:", visitor.value);
+  console.log("  visitor:", visitor.description);
 
   console.log("6. traceCauses");
   const chain = await wg.traceCauses("evt-duncan-visit");
