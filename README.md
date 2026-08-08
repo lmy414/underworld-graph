@@ -141,4 +141,4 @@ bi-temporal semantics on top of TypeGraph's transaction-time history.
 
 ## License
 
-GPL-3.0-only
+MIT

@@ -5,6 +5,15 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.1] - 2026-08-08
+
+### Changed
+- **协议更换**：GPL-3.0-only → **MIT**（宽松许可，允许任意使用/修改/分发，含闭源商用，仅要求保留版权声明）。LICENSE 全文、package.json/lock、README、DEPLOYMENT 同步。
+
+### Notes
+- 验证：`npm run typecheck` / `npm run build` 通过，`npm test` 106/106 全绿，
+  `npm run smoke` 通过。
+
 ## [0.3.0] - 2026-08-08
 
 ### Changed（破坏性，semver 0.x 破例升 minor；决策 2026-08-08：不兼容旧版本数据、存量废弃从 0 开始）

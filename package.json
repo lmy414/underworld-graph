@@ -1,6 +1,6 @@
 {
   "name": "underworld-graph",
-  "version": "0.3.0",
+  "version": "0.3.1",
   "description": "Bi-temporal narrative state graph for fiction-writing engines.",
   "keywords": [
     "narrative",
@@ -12,7 +12,7 @@
     "fiction",
     "worldbuilding"
   ],
-  "license": "GPL-3.0-only",
+  "license": "MIT",
   "author": "lmy414",
   "repository": {
     "type": "git",

@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>underworld-graph 部署与源码指南 · v0.3.0</title>
+<title>underworld-graph 部署与源码指南 · v0.3.1</title>
 <style>
   :root {
     --bg: #fafafa;
@@ -234,8 +234,8 @@
 <h1>underworld-graph 部署与源码指南</h1>
 
 <div class="meta">
-  <span>版本：<code>0.2.0</code></span>
-  <span>协议：GPL-3.0-only</span>
+  <span>版本：<code>0.3.1</code></span>
+  <span>协议：MIT</span>
   <span>作者：lmy414</span>
   <span>npm 包名：<code>underworld-graph</code></span>
 </div>
@@ -332,7 +332,7 @@ npm --version</code></pre>
     <tr>
       <td><strong>A. 作为依赖集成到你的服务</strong></td>
       <td>生产推荐</td>
-      <td>你的服务 <code>package.json</code> 加 <code>"underworld-graph": "0.2.0"</code>，自己的进程管 SQLite 文件路径</td>
+      <td>你的服务 <code>package.json</code> 加 <code>"underworld-graph": "0.3.1"</code>，自己的进程管 SQLite 文件路径</td>
     </tr>
     <tr>
       <td><strong>B. 从源码克隆自部署</strong></td>
@@ -352,7 +352,7 @@ npm --version</code></pre>
 <p>在你的服务目录：</p>
 
 <pre><code>cd /opt/your-service
-npm install underworld-graph@0.2.0
+npm install underworld-graph@0.3.1
 # 此时 better-sqlite3 + sqlite-vec 会被自动编译</code></pre>
 
 <p>你的服务代码：</p>
@@ -384,7 +384,7 @@ sudo chown -R your-service:your-service /var/lib/your-service/world</code></pre>
 <pre><code># 1. 克隆
 git clone git@github.com:lmy414/underworld-graph.git
 cd underworld-graph
-git checkout v0.2.0   # 或 master
+git checkout v0.3.1   # 或 master
 
 # 2. 装依赖（会编译 better-sqlite3 原生模块）
 npm install
@@ -579,7 +579,7 @@ CMD ["node", "dist/main.js"]</code></pre>
 │   └── visibility.test.ts      # 可见性声明
 ├── .gitignore
 ├── CHANGELOG.md
-├── LICENSE                     # GPL-3.0-only
+├── LICENSE                     # MIT
 ├── README.md
 ├── package.json
 ├── package-lock.json
@@ -603,10 +603,10 @@ CMD ["node", "dist/main.js"]</code></pre>
 
 <ul>
   <li><code>name</code>: <code>"underworld-graph"</code> — npm 包名（无 scope，公开包）。</li>
-  <li><code>version</code>: <code>"0.2.0"</code> — 当前发布版本。</li>
+  <li><code>version</code>: <code>"0.3.1"</code> — 当前发布版本。</li>
   <li><code>description</code>: <code>"Bi-temporal narrative state graph for fiction-writing engines."</code> — 一句话定位。</li>
   <li><code>keywords</code>: 8 个发现关键词：<code>narrative / story / graph / bi-temporal / sqlite / knowledge-graph / fiction / worldbuilding</code>。</li>
-  <li><code>license</code>: <code>"GPL-3.0-only"</code> — 强 copyleft，下游使用需注意传染性。</li>
+  <li><code>license</code>: <code>"MIT"</code> — 宽松许可，允许任意使用/修改/分发（含闭源商用），仅要求保留版权声明（0.3.1 起由 GPL-3.0-only 更换）。</li>
   <li><code>author</code>: <code>"lmy414"</code>。</li>
   <li><code>repository.url</code>: <code>"git+https://github.com/lmy414/underworld-graph.git"</code> — GitHub 仓库地址（注意：实际 push 时可能改用 SSH，见部署章节）。</li>
   <li><code>private</code>: <code>false</code> — 公开发布。</li>

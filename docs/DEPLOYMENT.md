@@ -1,6 +1,6 @@
 # underworld-graph 部署与源码指南
 
-> 版本：`0.2.0`　·　协议：GPL-3.0-only　·　作者：lmy414　·　npm 包名：`underworld-graph`
+> 版本：`0.3.1`　·　协议：MIT　·　作者：lmy414　·　npm 包名：`underworld-graph`
 >
 > 如果你对这个项目感兴趣，可以看看下面的内容，欢迎提出修改建议，我会认真采纳。
 
@@ -314,7 +314,7 @@ underworld-graph/
 │   └── visibility.test.ts      # 可见性声明
 ├── .gitignore
 ├── CHANGELOG.md
-├── LICENSE                     # GPL-3.0-only
+├── LICENSE                     # MIT
 ├── README.md
 ├── package.json
 ├── package-lock.json
@@ -337,12 +337,12 @@ underworld-graph/
 逐字段：
 
 - `name`: `"underworld-graph"` — npm 包名（无 scope，公开包）。
-- `version`: `"0.2.0"` — 当前发布版本。
+- `version`: `"0.3.1"` — 当前发布版本。
 - `description`: `"Bi-temporal narrative state graph for fiction-writing engines."`
   — 一句话定位。
 - `keywords`: 8 个发现关键词：`narrative / story / graph / bi-temporal / sqlite /
   knowledge-graph / fiction / worldbuilding`。
-- `license`: `"GPL-3.0-only"` — 强 copyleft，下游使用需注意传染性。
+- `license`: `"MIT"` — 宽松许可，允许任意使用/修改/分发（含闭源商用），仅要求保留版权声明（0.3.1 起由 GPL-3.0-only 更换）。
 - `author`: `"lmy414"`。
 - `repository.url`: `"git+https://github.com/lmy414/underworld-graph.git"` —
   GitHub 仓库地址（注意：实际 push 时可能改用 SSH，见部署章节）。
